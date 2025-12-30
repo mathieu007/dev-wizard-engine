@@ -1,0 +1,1 @@
+- Allow engine test typecheck to resolve sibling package sources and tighten command preset usage typing in describe output.
