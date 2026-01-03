@@ -19,6 +19,7 @@ interface WorkspaceManifestEntry {
 const DEFAULT_MANIFEST_PATH = "workspace.repos.json";
 const DEFAULT_COMMIT_MESSAGE = "chore: workspace push";
 const SUMMARY_FILENAME = "COMMIT.SUMMARY.md";
+const DEFAULT_COMMIT_MESSAGE_FILE = SUMMARY_FILENAME;
 const DEFAULT_PUBLISH_COMMAND = [
 	"pnpm",
 	"publish",
@@ -299,18 +300,59 @@ async function runWorkspacePush(
 	const manifestPath = resolveManifestPath(params, context);
 	const remoteName = readString(params.remoteName) ??
 		readString(context.state.answers.workspaceGitRemote);
+	const commitMessageFile = readString(params.commitMessageFile) ??
+		readString(context.state.answers.workspacePushCommitFile) ??
+		DEFAULT_COMMIT_MESSAGE_FILE;
+	const fallbackCommitMessage = readString(params.fallbackCommitMessage) ??
+		readString(context.state.answers.workspacePushFallbackCommitMessage) ??
+		DEFAULT_COMMIT_MESSAGE;
+	const pushTags = readBoolean(params.pushTags) ??
+		readBoolean(context.state.answers.workspacePushPushTags) ??
+		false;
+	const setUpstream = readBoolean(params.setUpstream) ??
+		readBoolean(context.state.answers.workspacePushSetUpstream) ??
+		true;
+	const filters = readStringArray(params.filters) ??
+		readStringArray(context.state.answers.workspacePushTargets);
+	const includeRoot = readBoolean(params.includeRoot) ??
+		readBoolean(context.state.answers.workspacePushIncludeRoot) ??
+		true;
 
 	const manifest = await readWorkspaceManifest(manifestPath);
-	if (manifest.length === 0) {
+	const entries = manifest.filter((entry) =>
+		shouldProcessPushEntry(entry, { filters }),
+	);
+
+	if (entries.length === 0) {
 		log.info("[workspace-push] manifest is empty; nothing to do.");
 		return;
 	}
 
-	for (const entry of manifest) {
-		await processPushEntry(entry, { repoRoot, dryRun, log, remoteName });
+	for (const entry of entries) {
+		await processPushEntry(entry, {
+			repoRoot,
+			dryRun,
+			log,
+			remoteName,
+			commitMessageFile,
+			fallbackCommitMessage,
+			pushTags,
+			setUpstream,
+		});
 	}
 
-	await processRootRepo({ repoRoot, dryRun, log, remoteName });
+	if (includeRoot) {
+		await processRootRepo({
+			repoRoot,
+			dryRun,
+			log,
+			remoteName,
+			commitMessageFile,
+			fallbackCommitMessage,
+			pushTags,
+			setUpstream,
+		});
+	}
 
 	log.success("[workspace-push] done");
 }
@@ -349,6 +391,29 @@ async function runWorkspacePublish(
 		["lint", "typecheck", "test", "build"];
 	const filters = readStringArray(params.filters) ??
 		readStringArray(context.state.answers.workspacePublishTargets);
+	const runPushFirst = readBoolean(params.runPushFirst) ??
+		readBoolean(context.state.answers.workspacePublishRunPushFirst) ??
+		false;
+	const pushParams = {
+		manifestPath,
+		dryRun,
+		remoteName: readString(context.state.answers.workspaceGitRemote),
+		commitMessageFile: readString(context.state.answers.workspacePushCommitFile) ??
+			DEFAULT_COMMIT_MESSAGE_FILE,
+		fallbackCommitMessage: readString(
+			context.state.answers.workspacePushFallbackCommitMessage,
+		) ?? DEFAULT_COMMIT_MESSAGE,
+		requireClean: readBoolean(context.state.answers.workspacePushRequireClean) ?? true,
+		pushTags: readBoolean(context.state.answers.workspacePushPushTags) ?? false,
+		setUpstream: readBoolean(context.state.answers.workspacePushSetUpstream) ?? true,
+		filters: readStringArray(context.state.answers.workspacePushTargets),
+		includeRoot: readBoolean(context.state.answers.workspacePushIncludeRoot) ?? true,
+	};
+
+	if (runPushFirst) {
+		log.info("[workspace-publish] running workspace-push before publish.");
+		await runWorkspacePush(pushParams, context);
+	}
 
 	const manifest = await readWorkspaceManifest(manifestPath);
 	const entries = manifest.filter((entry) =>
@@ -515,9 +580,22 @@ async function processPushEntry(
 		dryRun: boolean;
 		log: WizardActionContext["log"];
 		remoteName?: string;
+		commitMessageFile: string;
+		fallbackCommitMessage: string;
+		pushTags: boolean;
+		setUpstream: boolean;
 	},
 ): Promise<void> {
-	const { repoRoot, dryRun, log, remoteName } = options;
+	const {
+		repoRoot,
+		dryRun,
+		log,
+		remoteName,
+		commitMessageFile,
+		fallbackCommitMessage,
+		pushTags,
+		setUpstream,
+	} = options;
 	const relPath = readString(entry.path);
 	const name = readString(entry.name) ?? relPath ?? "(unknown)";
 	const repo = readString(entry.repo);
@@ -543,7 +621,13 @@ async function processPushEntry(
 		return;
 	}
 
-	const summaryPath = await ensureCommitSummary(repoDir, dryRun, log);
+	const summaryPath = await ensureCommitSummary(
+		repoDir,
+		commitMessageFile,
+		fallbackCommitMessage,
+		dryRun,
+		log,
+	);
 	await runCommand("git", ["add", "--all"], { cwd: repoDir, dryRun, log });
 
 	if (await hasStagedChanges(repoDir, dryRun, log)) {
@@ -554,10 +638,10 @@ async function processPushEntry(
 		);
 		await runCommand(
 			"git",
-			buildPushArgs(remoteName),
+			buildPushArgs(remoteName, { pushTags, setUpstream }),
 			{ cwd: repoDir, dryRun, log },
 		);
-		await clearSummary(summaryPath, dryRun, log);
+		await clearSummary(summaryPath, commitMessageFile, dryRun, log);
 		log.info("[workspace-push] committed and pushed changes.");
 		return;
 	}
@@ -579,14 +663,33 @@ async function processRootRepo(options: {
 	dryRun: boolean;
 	log: WizardActionContext["log"];
 	remoteName?: string;
+	commitMessageFile: string;
+	fallbackCommitMessage: string;
+	pushTags: boolean;
+	setUpstream: boolean;
 }): Promise<void> {
-	const { repoRoot, dryRun, log, remoteName } = options;
+	const {
+		repoRoot,
+		dryRun,
+		log,
+		remoteName,
+		commitMessageFile,
+		fallbackCommitMessage,
+		pushTags,
+		setUpstream,
+	} = options;
 	if (!hasGitMetadata(repoRoot)) {
 		log.info("[workspace-push] root directory is not a git repository; skipping root push.");
 		return;
 	}
 	log.info("[workspace-push] processing root workspace repository");
-	const summaryPath = await ensureCommitSummary(repoRoot, dryRun, log);
+	const summaryPath = await ensureCommitSummary(
+		repoRoot,
+		commitMessageFile,
+		fallbackCommitMessage,
+		dryRun,
+		log,
+	);
 	await runCommand("git", ["add", "--all"], { cwd: repoRoot, dryRun, log });
 	if (await hasStagedChanges(repoRoot, dryRun, log)) {
 		await runCommand(
@@ -595,7 +698,7 @@ async function processRootRepo(options: {
 			{ cwd: repoRoot, dryRun, log },
 		);
 		if (await hasRemoteConfigured(repoRoot, remoteName, dryRun, log)) {
-			await runCommand("git", buildPushArgs(remoteName), {
+			await runCommand("git", buildPushArgs(remoteName, { pushTags, setUpstream }), {
 				cwd: repoRoot,
 				dryRun,
 				log,
@@ -603,7 +706,7 @@ async function processRootRepo(options: {
 		} else {
 			log.info("[workspace-push] root has no git remote configured; skipping push.");
 		}
-		await clearSummary(summaryPath, dryRun, log);
+		await clearSummary(summaryPath, commitMessageFile, dryRun, log);
 		log.info("[workspace-push] committed root workspace changes.");
 		return;
 	}
@@ -619,40 +722,63 @@ async function processRootRepo(options: {
 	}
 }
 
-function buildPushArgs(remoteName?: string): string[] {
-	return remoteName ? ["push", "--no-verify", remoteName] : ["push", "--no-verify"];
+function buildPushArgs(
+	remoteName?: string,
+	options?: { pushTags?: boolean; setUpstream?: boolean },
+): string[] {
+	const args = ["push", "--no-verify"];
+	if (options?.setUpstream) {
+		args.push("-u");
+	}
+	if (remoteName) {
+		args.push(remoteName);
+	}
+	if (options?.pushTags) {
+		args.push("--tags");
+	}
+	return args;
 }
 
 async function ensureCommitSummary(
 	repoDir: string,
+	commitMessageFile: string,
+	fallbackCommitMessage: string,
 	dryRun: boolean,
 	log: WizardActionContext["log"],
 ): Promise<string> {
-	const summaryPath = path.join(repoDir, SUMMARY_FILENAME);
+	const summaryPath = path.join(repoDir, commitMessageFile || DEFAULT_COMMIT_MESSAGE_FILE);
 	if (dryRun) {
-		log.info(`[workspace-push] dry-run: ensure ${SUMMARY_FILENAME} exists in ${repoDir}`);
+		log.info(
+			`[workspace-push] dry-run: ensure ${path.basename(summaryPath)} exists in ${repoDir}`,
+		);
 		return summaryPath;
 	}
 
 	if (!fsSync.existsSync(summaryPath)) {
-		log.info(`[workspace-push] missing ${SUMMARY_FILENAME}; creating it now.`);
+		log.info(`[workspace-push] missing ${summaryPath}; creating it now.`);
+		await fs.mkdir(path.dirname(summaryPath), { recursive: true });
 		await fs.writeFile(summaryPath, "");
 	}
 	const contents = await fs.readFile(summaryPath, "utf8");
 	if (contents.trim().length === 0) {
-		log.info(`[workspace-push] ${SUMMARY_FILENAME} is empty; writing default message.`);
-		await fs.writeFile(summaryPath, `${DEFAULT_COMMIT_MESSAGE}\n`);
+		log.info(
+			`[workspace-push] ${path.basename(summaryPath)} is empty; writing default message.`,
+		);
+		await fs.writeFile(summaryPath, `${fallbackCommitMessage}\n`);
 	}
 	return summaryPath;
 }
 
 async function clearSummary(
 	summaryPath: string,
+	commitMessageFile: string,
 	dryRun: boolean,
 	log: WizardActionContext["log"],
 ): Promise<void> {
 	if (dryRun) {
-		log.info(`[workspace-push] dry-run: skip clearing ${SUMMARY_FILENAME}.`);
+		log.info(
+			`[workspace-push] dry-run: skip clearing ${path.basename(commitMessageFile || summaryPath)}.`,
+		);
 		return;
 	}
 	await fs.writeFile(summaryPath, "");
@@ -709,9 +835,10 @@ async function ensureGitClean(
 	entryName: string,
 	dryRun: boolean,
 	log: WizardActionContext["log"],
+	label = "workspace-publish",
 ): Promise<void> {
 	if (dryRun) {
-		log.info(`[workspace-publish] check clean git state for ${entryName} (skipped in dry-run)`);
+		log.info(`[${label}] check clean git state for ${entryName} (skipped in dry-run)`);
 		return;
 	}
 	const result = await execa("git", ["status", "--porcelain"], {
@@ -719,7 +846,7 @@ async function ensureGitClean(
 		reject: false,
 	});
 	if (result.exitCode !== 0) {
-		throw new Error(`[workspace-publish] git status failed in ${pkgDir}`);
+		throw new Error(`[${label}] git status failed in ${pkgDir}`);
 	}
 	if (result.stdout.trim().length > 0) {
 		throw new Error(
@@ -1059,6 +1186,24 @@ function shouldProcessPublishEntry(
 	const role = readString(entry.role) ?? "independent";
 	if (role === "internal-helper" && !includeInternal) {
 		return false;
+	}
+	return true;
+}
+
+function shouldProcessPushEntry(
+	entry: WorkspaceManifestEntry,
+	options: { filters: string[] | undefined },
+): boolean {
+	const { filters } = options;
+	if (filters && filters.length > 0) {
+		const matches = filters.some((filter) =>
+			[entry.name, entry.path].some(
+				(value) => typeof value === "string" && value.includes(filter),
+			),
+		);
+		if (!matches) {
+			return false;
+		}
 	}
 	return true;
 }
