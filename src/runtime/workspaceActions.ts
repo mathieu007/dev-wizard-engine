@@ -333,9 +333,22 @@ async function runWorkspacePublish(
 	const skipPublish = readBoolean(params.skipPublish) ??
 		readBoolean(context.state.answers.workspacePublishSkipPublish) ??
 		false;
+	const requireClean = readBoolean(params.requireClean) ??
+		readBoolean(context.state.answers.workspacePublishRequireClean) ??
+		true;
 	const publishRegistry = readString(params.publishRegistry) ??
 		readString(context.state.answers.workspacePublishRegistry);
-	const filters = readStringArray(params.filters);
+	const distTag = readString(params.distTag) ??
+		readString(context.state.answers.workspacePublishDistTag);
+	const releaseType = readString(params.releaseType) ??
+		readString(context.state.answers.workspacePublishReleaseType);
+	const prereleaseId = readString(params.prereleaseId) ??
+		readString(context.state.answers.workspacePublishPrereleaseId);
+	const checks = readStringArray(params.checks) ??
+		readStringArray(context.state.answers.workspacePublishChecks) ??
+		["lint", "typecheck", "test", "build"];
+	const filters = readStringArray(params.filters) ??
+		readStringArray(context.state.answers.workspacePublishTargets);
 
 	const manifest = await readWorkspaceManifest(manifestPath);
 	const entries = manifest.filter((entry) =>
@@ -372,7 +385,11 @@ async function runWorkspacePublish(
 			continue;
 		}
 
-		await ensureGitClean(pkgDir, name, dryRun, log);
+		if (requireClean) {
+			await ensureGitClean(pkgDir, name, dryRun, log);
+		} else {
+			log.info("[workspace-publish] git clean check skipped (per configuration).");
+		}
 
 		const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, "utf8")) as {
 			scripts?: Record<string, unknown>;
@@ -380,7 +397,10 @@ async function runWorkspacePublish(
 		const scripts = pkgJson.scripts ?? {};
 
 		if (!skipChecks) {
-			for (const script of ["lint", "typecheck", "test", "build"]) {
+			if (checks.length === 0) {
+				log.info("[workspace-publish] checks skipped (no checks selected).");
+			}
+			for (const script of checks) {
 				if (scripts[script]) {
 					await runCommand("pnpm", ["run", script], {
 						cwd: pkgDir,
@@ -408,11 +428,21 @@ async function runWorkspacePublish(
 		}
 
 		const [command, ...args] = publishCommand;
+		const env: Record<string, string> = {};
+		if (publishRegistry) {
+			env.NPM_CONFIG_REGISTRY = publishRegistry;
+		}
+		if (distTag) {
+			env.NPM_CONFIG_TAG = distTag;
+		}
+		if (releaseType === "prerelease" && prereleaseId) {
+			env.NPM_CONFIG_PREID = prereleaseId;
+		}
 		await runCommand(command, args, {
 			cwd: pkgDir,
 			dryRun,
 			log,
-			env: publishRegistry ? { NPM_CONFIG_REGISTRY: publishRegistry } : undefined,
+			env: Object.keys(env).length > 0 ? env : undefined,
 		});
 	}
 
