@@ -34,6 +34,7 @@ export interface DevWizardOptions {
 	planExpand?: PlanExpandSection[];
 	loadPersistedAnswers?: boolean;
 	answersPathUsed?: string;
+	answersPathImplicit?: boolean;
 	registerManifestPath?: string;
 	executeManifestPath?: string;
 	manifestForce?: boolean;

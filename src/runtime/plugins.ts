@@ -277,6 +277,13 @@ export function createPluginHelpers(
 	};
 }
 
+export function normalizeStepType(value: unknown): string {
+	return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
 export function isPluginStep(step: DevWizardStep): step is PluginStep {
-	return !BUILTIN_STEP_TYPES.includes(step.type as (typeof BUILTIN_STEP_TYPES)[number]);
+	const stepType = normalizeStepType(step.type);
+	return !BUILTIN_STEP_TYPES.includes(
+		stepType as (typeof BUILTIN_STEP_TYPES)[number],
+	);
 }

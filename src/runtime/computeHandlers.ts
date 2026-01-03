@@ -163,6 +163,141 @@ registerComputeHandler("commit-message-file", async (params) => {
 	return normalized.length > 0 ? normalized : fallbackMessage;
 });
 
+registerComputeHandler("workspace-bootstrap", async (params, context) => {
+	const repoRootParam = readString(params.repoRoot);
+	const repoRoot = repoRootParam
+		? path.resolve(repoRootParam)
+		: await findWorkspaceRoot(context.repoRoot);
+	const pathParam =
+		readString(params.path) ?? ".dev-wizard/answers/workspace/bootstrap.json";
+	const resolvedPath = path.isAbsolute(pathParam)
+		? pathParam
+		: path.resolve(repoRoot, pathParam);
+	const required = readBoolean(params.required) ?? true;
+	const requiredKeys =
+		readStringArray(params.requireKeys) ?? [
+			"workspaceManifestPath",
+			"workspaceGitRemote",
+			"workspaceDefaultBranch",
+		];
+	let raw: string;
+	try {
+		raw = await fs.readFile(resolvedPath, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			if (!required) {
+				return {};
+			}
+			throw new Error(
+				`Workspace bootstrap answers not found at ${resolvedPath}. Run "dev-wizard workspace bootstrap" to create them.`,
+			);
+		}
+		throw error;
+	}
+
+	let snapshot: unknown;
+	try {
+		snapshot = JSON.parse(raw) as unknown;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`Workspace bootstrap answers at ${resolvedPath} are not valid JSON: ${message}`,
+		);
+	}
+
+	const scenario =
+		snapshot && typeof snapshot === "object"
+			? (snapshot as { scenario?: Record<string, unknown> }).scenario
+			: undefined;
+	if (!scenario || typeof scenario !== "object" || Array.isArray(scenario)) {
+		if (!required) {
+			return {};
+		}
+		throw new Error(
+			`Workspace bootstrap answers at ${resolvedPath} are missing the "scenario" object. Re-run "dev-wizard workspace bootstrap".`,
+		);
+	}
+
+	const missingKeys = requiredKeys.filter(
+		(key) => readString(scenario[key]) === undefined,
+	);
+	if (missingKeys.length > 0 && required) {
+		throw new Error(
+			`Workspace bootstrap answers at ${resolvedPath} are missing required keys: ${missingKeys.join(
+				", ",
+			)}.`,
+		);
+	}
+
+	const values: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(scenario)) {
+		if (context.state.answers[key] === undefined) {
+			values[key] = value;
+		}
+	}
+
+	const meta =
+		snapshot && typeof snapshot === "object"
+			? (snapshot as { meta?: { execution?: Record<string, unknown> } }).meta
+			: undefined;
+	const execution = meta?.execution;
+	const sandboxFlag = readBoolean(execution?.sandbox);
+	const sandboxSlug = readString(execution?.sandboxSlug);
+	if (sandboxFlag !== undefined) {
+		values.workspaceBootstrapSandbox = sandboxFlag;
+	}
+	if (sandboxSlug) {
+		values.workspaceBootstrapSandboxSlug = sandboxSlug;
+	}
+	const envSandbox = context.templateContext.env.DEV_WIZARD_SANDBOX;
+	const runningInSandbox =
+		typeof envSandbox === "string" &&
+		envSandbox.length > 0 &&
+		envSandbox !== "0" &&
+		envSandbox.toLowerCase() !== "false";
+	if (sandboxFlag === true && !runningInSandbox) {
+		values.workspaceBootstrapSandboxMismatch = true;
+	}
+
+values.workspaceBootstrapPath = resolvedPath;
+return values;
+});
+
+registerComputeHandler("workspace-global-packages", async (params, context) => {
+	const repoRootParam = readString(params.repoRoot);
+	const repoRoot = repoRootParam
+		? path.resolve(repoRootParam)
+		: await findWorkspaceRoot(context.repoRoot);
+	const includeRoot = readBoolean(params.includeRoot) ?? false;
+	const maxDepth = readNumber(params.maxDepth);
+	const ignore = readStringArray(params.ignore);
+	const limit = readNumber(params.limit);
+	const manifestPathParam =
+		readString(params.manifestPath) ??
+		readString(context.state.answers.workspaceManifestPath);
+	const manifestPaths = await loadManifestPaths(repoRoot, manifestPathParam);
+
+	const projects = await listWorkspaceProjects({
+		repoRoot,
+		includeRoot,
+		maxDepth,
+		ignore,
+		limit,
+	});
+
+	const selected: string[] = [];
+	for (const project of projects) {
+		if (manifestPaths && !manifestPaths.has(project.id)) {
+			continue;
+		}
+		if (await packageHasBin(project.packageJsonPath)) {
+			selected.push(project.id);
+		}
+	}
+
+	return selected;
+});
+
 function readBoolean(value: unknown): boolean | undefined {
 	if (typeof value === "boolean") {
 		return value;
@@ -251,6 +386,81 @@ function sanitizeMaintenanceWindowName(value?: string): string | undefined {
 		.replace(/^-+/, "")
 		.replace(/-+$/, "");
 	return slug.length > 0 ? slug : undefined;
+}
+
+async function loadManifestPaths(
+	repoRoot: string,
+	manifestPath?: string,
+): Promise<Set<string> | undefined> {
+	if (!manifestPath) {
+		return undefined;
+	}
+	const resolved = path.isAbsolute(manifestPath)
+		? manifestPath
+		: path.resolve(repoRoot, manifestPath);
+	let raw: string;
+	try {
+		raw = await fs.readFile(resolved, "utf8");
+	} catch {
+		return undefined;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw) as unknown;
+	} catch {
+		return undefined;
+	}
+
+	if (!Array.isArray(parsed)) {
+		return undefined;
+	}
+
+	const paths = new Set<string>();
+	for (const entry of parsed) {
+		const entryPath = readString((entry as { path?: unknown }).path);
+		if (!entryPath) {
+			continue;
+		}
+		const normalized = path.normalize(
+			path.isAbsolute(entryPath)
+				? path.relative(repoRoot, entryPath)
+				: entryPath,
+		);
+		const trimmed = normalized === "" ? "." : normalized;
+		paths.add(trimmed);
+	}
+
+	return paths.size > 0 ? paths : undefined;
+}
+
+async function packageHasBin(packageJsonPath: string): Promise<boolean> {
+	let raw: string;
+	try {
+		raw = await fs.readFile(packageJsonPath, "utf8");
+	} catch {
+		return false;
+	}
+
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw) as unknown;
+	} catch {
+		return false;
+	}
+
+	if (!parsed || typeof parsed !== "object") {
+		return false;
+	}
+
+	const bin = (parsed as { bin?: unknown }).bin;
+	if (typeof bin === "string") {
+		return bin.trim().length > 0;
+	}
+	if (bin && typeof bin === "object") {
+		return Object.keys(bin as Record<string, unknown>).length > 0;
+	}
+	return false;
 }
 
 function quoteCommandPart(value: string): string {

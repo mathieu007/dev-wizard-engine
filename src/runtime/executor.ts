@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import { execa, execaCommand } from "execa";
-import type {
+import { BUILTIN_STEP_TYPES, type
 	BranchStep,
 	CommandDefaults,
 	CommandDescriptor,
@@ -14,6 +14,7 @@ import type {
 	DevWizardConfig,
 	DevWizardFlow,
 	DevWizardScenario,
+	GroupStep,
 	GitWorktreeGuardStep,
 	IterateStep,
 	MessageStep,
@@ -24,7 +25,7 @@ import type {
 	PromptStep,
 	StepTransitionTarget,
 	TransitionAction,
-} from "../loader/types";
+} from "../loader/types.js";
 import { renderMaybeNested, renderTemplate } from "./templates.js";
 import type { TemplateContext } from "./templates.js";
 import { evaluateCondition } from "./expression.js";
@@ -54,6 +55,7 @@ import {
 	createPluginHelpers,
 	createEmptyPluginRegistry,
 	isPluginStep,
+	normalizeStepType,
 } from "./plugins.js";
 import type {
 	WizardPluginRegistry,
@@ -701,44 +703,81 @@ async function previewStep(
 	plan: ScenarioPlan,
 	options: { nested: boolean },
 ): Promise<{ plan: StepPlan; next?: StepTransitionTarget }> {
-	if (isPluginStep(step)) {
-		return previewPluginStep(flow, step, state, context, templateContext, plan);
+	const stepType = normalizeStepType(step.type);
+	const isBuiltin = BUILTIN_STEP_TYPES.includes(
+		stepType as (typeof BUILTIN_STEP_TYPES)[number],
+	);
+	if (!isBuiltin) {
+		return previewPluginStep(
+			flow,
+			step as PluginStep,
+			state,
+			context,
+			templateContext,
+			plan,
+		);
 	}
 
-	switch (step.type) {
+	switch (stepType) {
 		case "command":
-			return previewCommandStep(flow.id, step, state, context, templateContext, plan);
+			return previewCommandStep(
+				flow.id,
+				step as CommandStep,
+				state,
+				context,
+				templateContext,
+				plan,
+			);
 		case "prompt":
-			return previewPromptStep(flow.id, step, state, context, templateContext, plan);
+			return previewPromptStep(
+				flow.id,
+				step as PromptStep,
+				state,
+				context,
+				templateContext,
+				plan,
+			);
 		case "message":
 			return {
-				plan: previewMessageStep(flow.id, step, templateContext, plan),
+				plan: previewMessageStep(
+					flow.id,
+					step as MessageStep,
+					templateContext,
+					plan,
+				),
 			};
 		case "branch":
-			return previewBranchStep(flow.id, step, state, templateContext, plan);
+			return previewBranchStep(
+				flow.id,
+				step as BranchStep,
+				state,
+				templateContext,
+				plan,
+			);
 		case "group": {
+			const groupStep = step as GroupStep;
 			const { flowPlan, exitTarget } = await previewFlow(
 				context,
 				state,
-				step.flow,
+				groupStep.flow,
 				0,
 				plan,
 				{ nested: true },
 			);
 			const groupPlan: GroupStepPlan = {
 				kind: "group",
-				id: step.id,
-				label: step.label,
-				flowId: step.flow,
+				id: groupStep.id,
+				label: groupStep.label,
+				flowId: groupStep.flow,
 				plan: flowPlan,
 			};
 			plan.events.push({
 				type: "plan.step",
 				flowId: flow.id,
-				stepId: step.id,
+				stepId: groupStep.id,
 				data: {
 					kind: "group",
-					flowId: step.flow,
+					flowId: groupStep.flow,
 				},
 			});
 			return {
@@ -747,13 +786,39 @@ async function previewStep(
 			};
 		}
 		case "iterate":
-			return previewIterateStep(flow.id, step, state, context, templateContext, plan);
+			return previewIterateStep(
+				flow.id,
+				step as IterateStep,
+				state,
+				context,
+				templateContext,
+				plan,
+			);
 		case "compute":
-			return previewComputeStep(flow.id, step, state, templateContext, context, plan);
+			return previewComputeStep(
+				flow.id,
+				step as ComputeStep,
+				state,
+				templateContext,
+				context,
+				plan,
+			);
 		case "git-worktree-guard":
-			return previewGitWorktreeGuardStep(flow.id, step, state, context, templateContext, plan);
-		default:
-			throw new Error(`Unsupported step type ${(step as { type: string }).type}`);
+			return previewGitWorktreeGuardStep(
+				flow.id,
+				step as GitWorktreeGuardStep,
+				state,
+				context,
+				templateContext,
+				plan,
+			);
+		default: {
+			const rawType = (step as { type?: unknown }).type;
+			const normalized = normalizeStepType(rawType);
+			throw new Error(
+				`Unsupported step type "${String(rawType)}" (normalized "${normalized}"). Register a plugin that provides this step type.`,
+			);
+		}
 	}
 }
 
@@ -1583,34 +1648,84 @@ async function executeStep(
 	context: ExecutorContext,
 ): Promise<StepResult> {
 	const templateContext = buildTemplateContext(context, state, step);
-
-	if (isPluginStep(step)) {
-		return executePluginStep(flow, step, state, context, templateContext);
+	const stepType = normalizeStepType(step.type);
+	const isBuiltin = BUILTIN_STEP_TYPES.includes(
+		stepType as (typeof BUILTIN_STEP_TYPES)[number],
+	);
+	if (!isBuiltin) {
+		return executePluginStep(
+			flow,
+			step as PluginStep,
+			state,
+			context,
+			templateContext,
+		);
 	}
 
-	switch (step.type) {
+	switch (stepType) {
 		case "prompt":
-			return executePromptStep(flow.id, step, state, context, templateContext);
+			return executePromptStep(
+				flow.id,
+				step as PromptStep,
+				state,
+				context,
+				templateContext,
+			);
 		case "message":
-			return executeMessageStep(step, templateContext, context);
+			return executeMessageStep(step as MessageStep, templateContext, context);
 		case "branch":
-			return executeBranchStep(flow.id, step, state, context, templateContext);
+			return executeBranchStep(
+				flow.id,
+				step as BranchStep,
+				state,
+				context,
+				templateContext,
+			);
 		case "group": {
-			const next = await runFlow(context.config, step.flow, state, context, {
+			const groupStep = step as GroupStep;
+			const next = await runFlow(context.config, groupStep.flow, state, context, {
 				checkpoint: context.checkpoint,
 			});
 			return { next, status: "success" };
 		}
 		case "command":
-			return executeCommandStep(flow.id, step, state, context, templateContext);
+			return executeCommandStep(
+				flow.id,
+				step as CommandStep,
+				state,
+				context,
+				templateContext,
+			);
 		case "iterate":
-			return executeIterateStep(flow.id, step, state, context, templateContext);
+			return executeIterateStep(
+				flow.id,
+				step as IterateStep,
+				state,
+				context,
+				templateContext,
+			);
 		case "compute":
-			return executeComputeStep(step, state, templateContext, context);
+			return executeComputeStep(
+				step as ComputeStep,
+				state,
+				templateContext,
+				context,
+			);
 		case "git-worktree-guard":
-			return executeGitWorktreeGuardStep(flow.id, step, state, context, templateContext);
-		default:
-			throw new Error(`Unsupported step type ${(step as { type: string }).type}`);
+			return executeGitWorktreeGuardStep(
+				flow.id,
+				step as GitWorktreeGuardStep,
+				state,
+				context,
+				templateContext,
+			);
+		default: {
+			const rawType = (step as { type?: unknown }).type;
+			const normalized = normalizeStepType(rawType);
+			throw new Error(
+				`Unsupported step type "${String(rawType)}" (normalized "${normalized}"). Register a plugin that provides this step type.`,
+			);
+		}
 	}
 }
 

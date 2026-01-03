@@ -42,6 +42,18 @@ export {
 	type CheckpointManager,
 	type CheckpointMetadata,
 } from "./runtime/checkpoints.js";
+export {
+	registerAction,
+	hasAction,
+	getAction,
+	listActions,
+	type WizardActionContext,
+	type WizardActionDefinition,
+	type WizardActionPlan,
+	type WizardActionResult,
+} from "./runtime/actionsRegistry.js";
+export { registerWorkspaceActions } from "./runtime/workspaceActions.js";
+export { createDevWizardPlugin as createActionsPlugin } from "./runtime/actionsPlugin.js";
 export { WizardExecutionError } from "./runtime/executor.js";
 export {
 	createLogWriter,
@@ -109,6 +121,7 @@ export {
 	WizardScriptError,
 	createProjectsOrchestratorOptions,
 	createMaintenanceOptions,
+	createWorkspaceOptions,
 	type DefineWizardCommandInput,
 	type WizardScriptCommandDefinition,
 	type RunWizardCommandOptions,
@@ -124,6 +137,7 @@ export {
 	type HandleScriptErrorOptions,
 	type ProjectsOrchestratorOptions,
 	type MaintenanceWizardOptions,
+	type WorkspaceWizardOptions,
 } from "./runtime/scriptKit.js";
 export {
 	listWorkspaceProjects,

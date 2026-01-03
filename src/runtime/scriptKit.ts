@@ -13,6 +13,8 @@ const PROJECTS_PRESET_SPECIFIER = "@dev-wizard/presets/projects";
 const PROJECTS_SCENARIO_ID = "multi-project-orchestration";
 const MAINTENANCE_PRESET_SPECIFIER = "@dev-wizard/presets/maintenance";
 const MAINTENANCE_SCENARIO_ID = "maintenance-window";
+const WORKSPACE_PRESET_SPECIFIER = "@dev-wizard/presets/workspace";
+const WORKSPACE_BOOTSTRAP_SCENARIO_ID = "workspace-bootstrap";
 
 export interface DefineWizardCommandInput {
 	id: string;
@@ -121,6 +123,14 @@ export interface MaintenanceWizardOptions {
 	presetSpecifier?: string;
 	scenarioId?: string;
 	overrides?: MaintenancePresetOverrides & Record<string, unknown>;
+	devWizardOptions?: DevWizardOptions;
+}
+
+export interface WorkspaceWizardOptions {
+	configPath?: string | string[];
+	presetSpecifier?: string;
+	scenarioId?: string;
+	overrides?: Record<string, unknown>;
 	devWizardOptions?: DevWizardOptions;
 }
 
@@ -267,6 +277,33 @@ export async function createMaintenanceOptions(
 	};
 }
 
+export async function createWorkspaceOptions(
+	options: WorkspaceWizardOptions = {},
+): Promise<DevWizardOptions> {
+	const { configPath, presetSpecifier, scenarioId, overrides, devWizardOptions } = options;
+	const {
+		configPath: discardConfig,
+		scenario: discardScenario,
+		overrides: baseOverrides,
+		...restWizardOptions
+	} = devWizardOptions ?? {};
+	void discardConfig;
+	void discardScenario;
+
+	const resolvedConfigPath =
+		configPath ?? resolveWorkspacePresetPath(presetSpecifier ?? WORKSPACE_PRESET_SPECIFIER);
+	const resolvedScenario = scenarioId ?? WORKSPACE_BOOTSTRAP_SCENARIO_ID;
+
+	const mergedOverrides = Object.assign({}, baseOverrides ?? {}, overrides ?? {});
+
+	return {
+		...restWizardOptions,
+		configPath: resolvedConfigPath,
+		scenario: resolvedScenario,
+		overrides: Object.keys(mergedOverrides).length > 0 ? mergedOverrides : undefined,
+	};
+}
+
 async function resolveProjectSelections(options: {
 	repoRoot: string;
 	projects?: string[];
@@ -319,6 +356,17 @@ function resolveMaintenancePresetPath(specifier: string): string {
 	} catch (error) {
 		throw new WizardScriptError(
 			`Failed to resolve maintenance preset "${specifier}". Ensure @dev-wizard/presets is installed or provide an explicit configPath.`,
+			{ cause: error },
+		);
+	}
+}
+
+function resolveWorkspacePresetPath(specifier: string): string {
+	try {
+		return nodeRequire.resolve(specifier);
+	} catch (error) {
+		throw new WizardScriptError(
+			`Failed to resolve workspace preset "${specifier}". Ensure @dev-wizard/presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}

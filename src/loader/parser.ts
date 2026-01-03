@@ -344,10 +344,6 @@ const computeStepSchema = stepBaseSchema.extend({
 	.refine((step) => !(step.values && step.handler), {
 		message: "compute step cannot define both values and handler.",
 		path: ["handler"],
-	})
-	.refine((step) => !step.handler || Boolean(step.storeAs), {
-		message: "compute.handler requires storeAs.",
-		path: ["storeAs"],
 	});
 
 const gitWorktreeGuardStepSchema = stepBaseSchema.extend({
