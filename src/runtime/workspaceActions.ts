@@ -1037,12 +1037,11 @@ async function readPublishedVersion(
 	distTag: string | undefined,
 	log: WizardActionContext["log"],
 ): Promise<string | undefined> {
-	const args = ["view", packageName];
-	if (distTag) {
-		args.push("dist-tags");
-	} else {
-		args.push("version");
-	}
+	const args = [
+		"view",
+		packageName,
+		distTag ? `dist-tags.${distTag}` : "version",
+	];
 	if (registry) {
 		args.push("--registry", registry);
 	}
@@ -1052,19 +1051,7 @@ async function readPublishedVersion(
 		return undefined;
 	}
 	const output = result.stdout.trim();
-	if (!output) {
-		return undefined;
-	}
-	if (distTag) {
-		try {
-			const tags = JSON.parse(output) as Record<string, unknown>;
-			const tagged = tags[distTag];
-			return typeof tagged === "string" ? tagged : undefined;
-		} catch {
-			return undefined;
-		}
-	}
-	return output;
+	return output || undefined;
 }
 
 async function isWorkspaceClean(
