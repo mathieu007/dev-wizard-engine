@@ -323,12 +323,21 @@ async function runWorkspacePush(
 		shouldProcessPushEntry(entry, { filters }),
 	);
 
+	const normalizedEntries = entries.map((entry) => ({
+		...entry,
+		path: normalizeWorkspacePath(readString(entry.path) ?? "", repoRoot),
+	}));
+	const hasRootEntry = normalizedEntries.some((entry) => entry.path === ".");
+	const processedEntries = includeRoot
+		? normalizedEntries.filter((entry) => entry.path !== ".")
+		: normalizedEntries;
+
 	if (entries.length === 0) {
 		log.info("[workspace-push] manifest is empty; nothing to do.");
 		return;
 	}
 
-	for (const entry of entries) {
+	for (const entry of processedEntries) {
 		await processPushEntry(entry, {
 			repoRoot,
 			dryRun,
@@ -341,7 +350,11 @@ async function runWorkspacePush(
 		});
 	}
 
-	if (includeRoot) {
+	if (includeRoot && !hasRootEntry) {
+		log.warn("[workspace-push] root push requested, but no root entry found in manifest; skipping root.");
+	}
+
+	if (includeRoot && hasRootEntry) {
 		await processRootRepo({
 			repoRoot,
 			dryRun,
@@ -905,6 +918,13 @@ function resolveDryRun(
 ): boolean {
 	const explicit = readBoolean(params.dryRun);
 	return Boolean(context.dryRun || explicit);
+}
+
+function normalizeWorkspacePath(entryPath: string, repoRoot: string): string {
+	const normalized = path.normalize(
+		path.isAbsolute(entryPath) ? path.relative(repoRoot, entryPath) : entryPath,
+	);
+	return normalized === "" ? "." : normalized;
 }
 
 async function resolveWorkspaceGlobalPackages(

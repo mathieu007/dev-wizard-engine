@@ -10,6 +10,8 @@ export interface ComputeHandlerContext {
 	templateContext: TemplateContext;
 }
 
+const DEFAULT_WORKSPACE_MANIFEST_PATH = "workspace.repos.json";
+
 export type ComputeHandler = (
 	params: Record<string, unknown>,
 	context: ComputeHandlerContext,
@@ -298,6 +300,164 @@ registerComputeHandler("workspace-global-packages", async (params, context) => {
 	return selected;
 });
 
+type WorkspaceManifestEntryInput = {
+	path?: unknown;
+	repo?: unknown;
+	name?: unknown;
+	defaultBranch?: unknown;
+	role?: unknown;
+	publishCommand?: unknown;
+	[key: string]: unknown;
+};
+
+registerComputeHandler("workspace-manifest-list", async (params, context) => {
+	const repoRoot = resolveRepoRoot(params, context);
+	const manifestPathParam =
+		readString(params.manifestPath) ??
+		readString(context.state.answers.workspaceManifestPath) ??
+		DEFAULT_WORKSPACE_MANIFEST_PATH;
+	const resolvedManifestPath = path.isAbsolute(manifestPathParam)
+		? manifestPathParam
+		: path.resolve(repoRoot, manifestPathParam);
+
+	let entries: unknown = [];
+	try {
+		const raw = await fs.readFile(resolvedManifestPath, "utf8");
+		entries = JSON.parse(raw) as unknown;
+		if (!Array.isArray(entries)) {
+			throw new Error("workspace manifest must be a JSON array");
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			entries = [];
+		} else {
+			throw error;
+		}
+	}
+
+	return {
+		workspaceManifestPath: resolvedManifestPath,
+		workspaceManifestEntries: entries,
+	};
+});
+
+registerComputeHandler("workspace-manifest-update", async (params, context) => {
+	const repoRoot = resolveRepoRoot(params, context);
+	const manifestPathParam =
+		readString(params.manifestPath) ??
+		readString(context.state.answers.workspaceManifestPath) ??
+		DEFAULT_WORKSPACE_MANIFEST_PATH;
+	const resolvedManifestPath = path.isAbsolute(manifestPathParam)
+		? manifestPathParam
+		: path.resolve(repoRoot, manifestPathParam);
+	const mode = readString(params.mode);
+	if (!mode) {
+		throw new Error('workspace-manifest-update: "mode" is required.');
+	}
+
+	let manifest: unknown = [];
+	try {
+		const raw = await fs.readFile(resolvedManifestPath, "utf8");
+		manifest = JSON.parse(raw) as unknown;
+		if (!Array.isArray(manifest)) {
+			throw new Error("workspace manifest must be a JSON array");
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+			if (mode === "remove" || mode === "update") {
+				throw new Error(
+					`workspace manifest not found at ${resolvedManifestPath}; cannot ${mode} entry.`,
+				);
+			}
+			manifest = [];
+		} else {
+			throw error;
+		}
+	}
+
+	const normalizedManifest = (manifest as WorkspaceManifestEntryInput[]).map((entry) => {
+		const p = readString(entry.path);
+		return {
+			...entry,
+			path: normalizeWorkspacePath(p ?? "", repoRoot),
+		};
+	});
+
+	const entryInput = params.entry as Record<string, unknown> | undefined;
+	const entryPathRaw =
+		readString(params.path) ??
+		readString(entryInput?.path) ??
+		(mode === "root" ? "." : undefined);
+	const entryPath = entryPathRaw
+		? normalizeWorkspacePath(entryPathRaw, repoRoot)
+		: undefined;
+
+	if ((mode === "remove" || mode === "update" || mode === "add" || mode === "root") && !entryPath) {
+		throw new Error('workspace-manifest-update: "path" is required for this mode.');
+	}
+
+	if (mode === "remove") {
+		const filtered = normalizedManifest.filter(
+			(entry) => normalizeWorkspacePath(readString(entry.path) ?? "", repoRoot) !== entryPath!,
+		);
+		await fs.writeFile(resolvedManifestPath, `${JSON.stringify(filtered, null, 2)}\n`);
+		return {
+			workspaceManifestPath: resolvedManifestPath,
+			workspaceManifestEntries: filtered,
+			workspaceManifestUpdated: true,
+		};
+	}
+
+	const targetEntryPath = entryPath ?? ".";
+	const entryRepo = readString(params.repo) ?? readString(entryInput?.repo);
+	if (!entryRepo) {
+		throw new Error('workspace-manifest-update: "repo" is required for this mode.');
+	}
+
+	const entryName =
+		readString(params.name) ??
+		readString(entryInput?.name) ??
+		(entryPath === "." ? "workspace-root" : entryPath);
+	const entryDefaultBranch =
+		readString(params.defaultBranch) ?? readString(entryInput?.defaultBranch);
+	const entryRole = readString(params.role) ?? readString(entryInput?.role);
+	const publishCommandRaw =
+		readString(params.publishCommand) ?? readString(entryInput?.publishCommand);
+	const publishCommandArray = Array.isArray(entryInput?.publishCommand)
+		? entryInput?.publishCommand.filter((v) => typeof v === "string") as string[]
+		: publishCommandRaw
+			? publishCommandRaw.split(/\s+/).filter((v) => v.length > 0)
+			: undefined;
+
+	const newEntry: WorkspaceManifestEntryInput & { path: string } = {
+		name: entryName,
+		path: targetEntryPath,
+		repo: entryRepo,
+	};
+	if (entryDefaultBranch) {
+		newEntry.defaultBranch = entryDefaultBranch;
+	}
+	if (entryRole) {
+		newEntry.role = entryRole;
+	}
+	if (publishCommandArray && publishCommandArray.length > 0) {
+		newEntry.publishCommand = publishCommandArray;
+	}
+
+	const filtered = normalizedManifest.filter((entry) => {
+		const entryPathValue = readString(entry.path);
+		return normalizeWorkspacePath(entryPathValue ?? "", repoRoot) !== targetEntryPath;
+	});
+	filtered.push(newEntry);
+	await fs.writeFile(resolvedManifestPath, `${JSON.stringify(filtered, null, 2)}\n`);
+
+	return {
+		workspaceManifestPath: resolvedManifestPath,
+		workspaceManifestEntries: filtered,
+		workspaceManifestUpdated: true,
+	};
+});
+
 function readBoolean(value: unknown): boolean | undefined {
 	if (typeof value === "boolean") {
 		return value;
@@ -339,6 +499,18 @@ function readStringArray(value: unknown): string[] | undefined {
 
 function readString(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() !== "" ? value : undefined;
+}
+
+function resolveRepoRoot(params: Record<string, unknown>, context: ComputeHandlerContext): string {
+	const repoRootParam = readString(params.repoRoot);
+	return repoRootParam ? path.resolve(repoRootParam) : context.repoRoot;
+}
+
+function normalizeWorkspacePath(entryPath: string, repoRoot: string): string {
+	const normalized = path.normalize(
+		path.isAbsolute(entryPath) ? path.relative(repoRoot, entryPath) : entryPath,
+	);
+	return normalized === "" ? "." : normalized;
 }
 
 function parseTemplateJsonValue(value: unknown): unknown {
