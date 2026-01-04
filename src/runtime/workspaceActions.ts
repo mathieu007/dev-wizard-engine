@@ -553,7 +553,7 @@ async function runWorkspacePublish(
 			continue;
 		}
 
-		const publishCommand = Array.isArray(entry.publishCommand) &&
+		let publishCommand = Array.isArray(entry.publishCommand) &&
 			entry.publishCommand.every((part) => typeof part === "string")
 			? entry.publishCommand
 			: DEFAULT_PUBLISH_COMMAND;
@@ -562,13 +562,20 @@ async function runWorkspacePublish(
 			continue;
 		}
 
-		const [command, ...args] = publishCommand;
+		const args = [...publishCommand];
+		const command = args.shift() as string;
 		const env: Record<string, string> = {};
 		if (publishRegistry) {
 			env.NPM_CONFIG_REGISTRY = publishRegistry;
+			if (!args.includes("--registry")) {
+				args.push("--registry", publishRegistry);
+			}
 		}
 		if (distTag) {
 			env.NPM_CONFIG_TAG = distTag;
+			if (!args.includes("--tag")) {
+				args.push("--tag", distTag);
+			}
 		}
 		if (releaseType === "prerelease" && prereleaseId) {
 			env.NPM_CONFIG_PREID = prereleaseId;
