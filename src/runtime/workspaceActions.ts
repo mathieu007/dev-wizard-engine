@@ -80,6 +80,16 @@ export function registerWorkspaceActions(): void {
 	});
 
 	registerAction({
+		id: "workspace-apply-publish-registry",
+		label: "Workspace apply publish registry",
+		plan: (params, context) => ({
+			summary: "Apply publishConfig.registry to workspace packages",
+			details: buildWorkspacePlanDetails(params, context),
+		}),
+		run: runWorkspaceApplyPublishRegistry,
+	});
+
+	registerAction({
 		id: "workspace-bump-versions",
 		label: "Workspace bump versions",
 		plan: (params, context) => ({
@@ -382,6 +392,63 @@ async function runWorkspacePush(
 	log.success("[workspace-push] done");
 }
 
+async function runWorkspaceApplyPublishRegistry(
+	params: Record<string, unknown>,
+	context: WizardActionContext,
+): Promise<void> {
+	ensureWorkspaceActionsRegistered();
+	const log = context.log;
+	const repoRoot = resolveRepoRoot(params, context);
+	const manifestPath = resolveManifestPath(params, context);
+	const registry = readString(params.registry);
+	const includeRoot = readBoolean(params.includeRoot) ?? true;
+	if (!registry) {
+		log.warn("[workspace-apply-publish-registry] no registry provided; skipping.");
+		return;
+	}
+
+	const manifest = await readWorkspaceManifest(manifestPath);
+	const paths = manifest
+		.map((entry) => readString(entry.path))
+		.filter((p): p is string => Boolean(p))
+		.map((p) => normalizeWorkspacePath(p, repoRoot));
+
+	if (includeRoot && !paths.includes(".")) {
+		paths.push(".");
+	}
+
+	if (paths.length === 0) {
+		log.warn("[workspace-apply-publish-registry] manifest is empty; nothing to update.");
+		return;
+	}
+
+	for (const relPath of paths) {
+		const pkgDir = path.resolve(repoRoot, relPath);
+		const pkgPath = path.join(pkgDir, "package.json");
+		if (!(await pathExists(pkgPath))) {
+			log.warn(`[workspace-apply-publish-registry] ${relPath}: package.json not found; skipping.`);
+			continue;
+		}
+		const pkgRaw = await fs.readFile(pkgPath, "utf8");
+		const pkg = JSON.parse(pkgRaw) as {
+			publishConfig?: { registry?: string; tag?: string; access?: string };
+		};
+		pkg.publishConfig = pkg.publishConfig ?? {};
+		pkg.publishConfig.registry = registry;
+		const updated = JSON.stringify(pkg, null, 2);
+		if (updated !== pkgRaw) {
+			log.info(
+				`[workspace-apply-publish-registry] set publishConfig.registry to ${registry} for ${relPath}`,
+			);
+			await fs.writeFile(pkgPath, `${updated}\n`, "utf8");
+		} else {
+			log.info(`[workspace-apply-publish-registry] ${relPath} already set; no change.`);
+		}
+	}
+
+	log.success("[workspace-apply-publish-registry] done");
+}
+
 async function runWorkspacePublish(
 	params: Record<string, unknown>,
 	context: WizardActionContext,
@@ -526,8 +593,13 @@ async function runWorkspacePublish(
 		const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, "utf8")) as {
 			version?: string;
 			scripts?: Record<string, unknown>;
+			publishConfig?: { registry?: string; tag?: string };
 		};
 		const pkgVersion = readString(pkgJson.version);
+		const pkgRegistry = readString(pkgJson.publishConfig?.registry);
+		const pkgTag = readString(pkgJson.publishConfig?.tag);
+		const effectiveRegistry = pkgRegistry ?? publishRegistry;
+		const effectiveTag = pkgTag ?? distTag;
 
 		if (requireClean) {
 			await ensureGitClean(pkgDir, name, dryRun, log);
@@ -560,7 +632,7 @@ async function runWorkspacePublish(
 		}
 
 		if (skipExistingPublished && pkgVersion) {
-			const published = await readPublishedVersion(name, publishRegistry, distTag, log);
+			const published = await readPublishedVersion(name, effectiveRegistry, effectiveTag, log);
 			if (published && published === pkgVersion) {
 				log.info(
 					`[workspace-publish] ${name} ${pkgVersion} already published; skipping.`,
@@ -581,16 +653,16 @@ async function runWorkspacePublish(
 		const args = [...publishCommand];
 		const command = args.shift() as string;
 		const env: Record<string, string> = {};
-		if (publishRegistry) {
-			env.NPM_CONFIG_REGISTRY = publishRegistry;
+		if (effectiveRegistry) {
+			env.NPM_CONFIG_REGISTRY = effectiveRegistry;
 			if (!args.includes("--registry")) {
-				args.push("--registry", publishRegistry);
+				args.push("--registry", effectiveRegistry);
 			}
 		}
-		if (distTag) {
-			env.NPM_CONFIG_TAG = distTag;
+		if (effectiveTag) {
+			env.NPM_CONFIG_TAG = effectiveTag;
 			if (!args.includes("--tag")) {
-				args.push("--tag", distTag);
+				args.push("--tag", effectiveTag);
 			}
 		}
 		if (releaseType === "prerelease" && prereleaseId) {
