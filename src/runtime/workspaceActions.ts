@@ -429,6 +429,8 @@ async function runWorkspacePublish(
 	const runPushFirst = readBoolean(params.runPushFirst) ??
 		readBoolean(context.state.answers.workspacePublishRunPushFirst) ??
 		false;
+	const pushRequireClean =
+		readBoolean(context.state.answers.workspacePushRequireClean) ?? true;
 	const pushParams = {
 		manifestPath,
 		dryRun,
@@ -438,19 +440,27 @@ async function runWorkspacePublish(
 		fallbackCommitMessage: readString(
 			context.state.answers.workspacePushFallbackCommitMessage,
 		) ?? DEFAULT_COMMIT_MESSAGE,
-		requireClean: readBoolean(context.state.answers.workspacePushRequireClean) ?? true,
+		requireClean:
+			bumpVersions && releaseType !== "manual" ? false : pushRequireClean,
 		pushTags: readBoolean(context.state.answers.workspacePushPushTags) ?? false,
 		setUpstream: readBoolean(context.state.answers.workspacePushSetUpstream) ?? true,
 		filters: readStringArray(context.state.answers.workspacePushTargets),
 		includeRoot: readBoolean(context.state.answers.workspacePushIncludeRoot) ?? true,
 	};
 
-	if (runPushFirst) {
-		log.info("[workspace-publish] running workspace-push before publish.");
-		await runWorkspacePush(pushParams, context);
-	}
-
 	if (bumpVersions && releaseType !== "manual") {
+		const cleanBeforeBump = await isWorkspaceClean(
+			manifestPath,
+			repoRoot,
+			includeInternal,
+			filters,
+			log,
+		);
+		if (!cleanBeforeBump) {
+			log.warn(
+				"[workspace-publish] skipping auto-bump because working tree is dirty; clean or disable auto-bump to proceed.",
+			);
+		} else {
 		log.info(
 			`[workspace-publish] auto version bump requested (releaseType=${releaseType}, prereleaseId=${prereleaseId})`,
 		);
@@ -466,7 +476,13 @@ async function runWorkspacePublish(
 				tagTemplate: DEFAULT_PUBLISH_TAG_TEMPLATE,
 			},
 			context,
-		);
+			);
+		}
+	}
+
+	if (runPushFirst) {
+		log.info("[workspace-publish] running workspace-push before publish.");
+		await runWorkspacePush(pushParams, context);
 	}
 
 	const manifest = await readWorkspaceManifest(manifestPath);
@@ -990,6 +1006,44 @@ async function hasRemoteConfigured(
 		return remotes.includes(remoteName);
 	}
 	return remotes.length > 0;
+}
+
+async function isWorkspaceClean(
+	manifestPath: string,
+	repoRoot: string,
+	includeInternal: boolean,
+	filters: string[] | undefined,
+	log: WizardActionContext["log"],
+): Promise<boolean> {
+	const manifest = await readWorkspaceManifest(manifestPath);
+	const entries = manifest.filter((entry) =>
+		shouldProcessPublishEntry(entry, { includeInternal, filters }),
+	);
+
+	for (const entry of entries) {
+		const relPath = readString(entry.path);
+		if (!relPath) {
+			continue;
+		}
+		const pkgDir = path.resolve(repoRoot, relPath);
+		if (!(await pathExists(pkgDir))) {
+			continue;
+		}
+		const status = await execa("git", ["status", "--porcelain"], {
+			cwd: pkgDir,
+			reject: false,
+		});
+		if (status.exitCode !== 0) {
+			throw new Error(`[workspace-publish] git status failed in ${pkgDir}`);
+		}
+		if (status.stdout.trim().length > 0) {
+			log.warn(
+				`[workspace-publish] ${relPath} is dirty; auto-bump will be skipped to avoid repeated version increments.`,
+			);
+			return false;
+		}
+	}
+	return true;
 }
 
 async function ensureGitClean(
