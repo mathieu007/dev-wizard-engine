@@ -413,6 +413,22 @@ async function runWorkspaceApplyPublishRegistry(
 		.filter((p): p is string => Boolean(p))
 		.map((p) => normalizeWorkspacePath(p, repoRoot));
 
+	// Fallback: if manifest is empty or missing entries, discover workspace projects.
+	if (paths.length === 0) {
+		const discovered = await listWorkspaceProjects({
+			repoRoot,
+			includeRoot: true,
+			maxDepth: 3,
+		});
+		for (const project of discovered) {
+			// listWorkspaceProjects returns ids as relative paths
+			const rel = normalizeWorkspacePath(project.id, repoRoot);
+			if (!paths.includes(rel)) {
+				paths.push(rel);
+			}
+		}
+	}
+
 	if (includeRoot && !paths.includes(".")) {
 		paths.push(".");
 	}
