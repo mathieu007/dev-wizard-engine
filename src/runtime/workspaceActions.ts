@@ -431,6 +431,10 @@ async function runWorkspacePublish(
 		false;
 	const pushRequireClean =
 		readBoolean(context.state.answers.workspacePushRequireClean) ?? true;
+	const skipExistingPublished =
+		readBoolean(params.skipExistingPublished) ??
+		readBoolean(context.state.answers.workspacePublishSkipExisting) ??
+		true;
 	const pushParams = {
 		manifestPath,
 		dryRun,
@@ -519,6 +523,11 @@ async function runWorkspacePublish(
 			log.warn(`[workspace-publish] missing package.json in ${relPath}; skipping.`);
 			continue;
 		}
+		const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, "utf8")) as {
+			version?: string;
+			scripts?: Record<string, unknown>;
+		};
+		const pkgVersion = readString(pkgJson.version);
 
 		if (requireClean) {
 			await ensureGitClean(pkgDir, name, dryRun, log);
@@ -526,9 +535,6 @@ async function runWorkspacePublish(
 			log.info("[workspace-publish] git clean check skipped (per configuration).");
 		}
 
-		const pkgJson = JSON.parse(await fs.readFile(pkgJsonPath, "utf8")) as {
-			scripts?: Record<string, unknown>;
-		};
 		const scripts = pkgJson.scripts ?? {};
 
 		if (!skipChecks) {
@@ -551,6 +557,16 @@ async function runWorkspacePublish(
 		if (skipPublish) {
 			log.info("[workspace-publish] publish skipped via skipPublish flag.");
 			continue;
+		}
+
+		if (skipExistingPublished && pkgVersion) {
+			const published = await readPublishedVersion(name, publishRegistry, distTag, log);
+			if (published && published === pkgVersion) {
+				log.info(
+					`[workspace-publish] ${name} ${pkgVersion} already published; skipping.`,
+				);
+				continue;
+			}
 		}
 
 		let publishCommand = Array.isArray(entry.publishCommand) &&
@@ -1013,6 +1029,42 @@ async function hasRemoteConfigured(
 		return remotes.includes(remoteName);
 	}
 	return remotes.length > 0;
+}
+
+async function readPublishedVersion(
+	packageName: string,
+	registry: string | undefined,
+	distTag: string | undefined,
+	log: WizardActionContext["log"],
+): Promise<string | undefined> {
+	const args = ["view", packageName];
+	if (distTag) {
+		args.push("dist-tags");
+	} else {
+		args.push("version");
+	}
+	if (registry) {
+		args.push("--registry", registry);
+	}
+	const result = await execa("pnpm", args, { reject: false });
+	if (result.exitCode !== 0) {
+		log.warn(`[workspace-publish] unable to read registry version for ${packageName}; proceeding.`);
+		return undefined;
+	}
+	const output = result.stdout.trim();
+	if (!output) {
+		return undefined;
+	}
+	if (distTag) {
+		try {
+			const tags = JSON.parse(output) as Record<string, unknown>;
+			const tagged = tags[distTag];
+			return typeof tagged === "string" ? tagged : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+	return output;
 }
 
 async function isWorkspaceClean(
