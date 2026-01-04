@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import fsSync from "node:fs";
 import path from "node:path";
 import { execa } from "execa";
+import semver from "semver";
 
 import type { WizardActionContext } from "./actionsRegistry.js";
 import { registerAction } from "./actionsRegistry.js";
@@ -20,6 +21,7 @@ const DEFAULT_MANIFEST_PATH = "workspace.repos.json";
 const DEFAULT_COMMIT_MESSAGE = "chore: workspace push";
 const SUMMARY_FILENAME = "COMMIT.SUMMARY.md";
 const DEFAULT_COMMIT_MESSAGE_FILE = SUMMARY_FILENAME;
+const DEFAULT_PUBLISH_TAG_TEMPLATE = "${name}@${version}";
 const DEFAULT_PUBLISH_COMMAND = [
 	"pnpm",
 	"publish",
@@ -75,6 +77,16 @@ export function registerWorkspaceActions(): void {
 			details: buildWorkspacePlanDetails(params, context),
 		}),
 		run: runWorkspacePublish,
+	});
+
+	registerAction({
+		id: "workspace-bump-versions",
+		label: "Workspace bump versions",
+		plan: (params, context) => ({
+			summary: "Bump workspace package versions",
+			details: buildWorkspacePlanDetails(params, context),
+		}),
+		run: runWorkspaceBumpVersions,
 	});
 
 	registerAction({
@@ -379,6 +391,20 @@ async function runWorkspacePublish(
 	const dryRun = resolveDryRun(params, context);
 	const repoRoot = resolveRepoRoot(params, context);
 	const manifestPath = resolveManifestPath(params, context);
+	const bumpVersions =
+		readBoolean(params.bumpVersions) ??
+		readBoolean(context.state.answers.workspacePublishAutoBump) ??
+		false;
+	const skipBumpConfirm =
+		readBoolean(params.skipBumpConfirm) ??
+		readBoolean(context.state.answers.workspacePublishSkipVersionConfirm) ??
+		false;
+	const releaseType = readString(params.releaseType) ??
+		readString(context.state.answers.workspacePublishReleaseType) ??
+		"patch";
+	const prereleaseId = readString(params.prereleaseId) ??
+		readString(context.state.answers.workspacePublishPrereleaseId) ??
+		"rc";
 	const includeInternal = readBoolean(params.includeInternal) ??
 		readBoolean(context.state.answers.workspacePublishIncludeInternal) ??
 		false;
@@ -395,10 +421,6 @@ async function runWorkspacePublish(
 		readString(context.state.answers.workspacePublishRegistry);
 	const distTag = readString(params.distTag) ??
 		readString(context.state.answers.workspacePublishDistTag);
-	const releaseType = readString(params.releaseType) ??
-		readString(context.state.answers.workspacePublishReleaseType);
-	const prereleaseId = readString(params.prereleaseId) ??
-		readString(context.state.answers.workspacePublishPrereleaseId);
 	const checks = readStringArray(params.checks) ??
 		readStringArray(context.state.answers.workspacePublishChecks) ??
 		["lint", "typecheck", "test", "build"];
@@ -426,6 +448,25 @@ async function runWorkspacePublish(
 	if (runPushFirst) {
 		log.info("[workspace-publish] running workspace-push before publish.");
 		await runWorkspacePush(pushParams, context);
+	}
+
+	if (bumpVersions && releaseType !== "manual") {
+		log.info(
+			`[workspace-publish] auto version bump requested (releaseType=${releaseType}, prereleaseId=${prereleaseId})`,
+		);
+		await runWorkspaceBumpVersions(
+			{
+				manifestPath,
+				dryRun,
+				filters,
+				includeInternal,
+				releaseType,
+				prereleaseId,
+				skipConfirm: skipBumpConfirm,
+				tagTemplate: DEFAULT_PUBLISH_TAG_TEMPLATE,
+			},
+			context,
+		);
 	}
 
 	const manifest = await readWorkspaceManifest(manifestPath);
@@ -527,6 +568,114 @@ async function runWorkspacePublish(
 	log.success("[workspace-publish] done");
 }
 
+async function runWorkspaceBumpVersions(
+	params: Record<string, unknown>,
+	context: WizardActionContext,
+): Promise<void> {
+	const log = context.log;
+	const dryRun = resolveDryRun(params, context);
+	const repoRoot = resolveRepoRoot(params, context);
+	const manifestPath = resolveManifestPath(params, context);
+	const filters = readStringArray(params.filters) ??
+		readStringArray(context.state.answers.workspacePublishTargets);
+	const includeInternal =
+		readBoolean(params.includeInternal) ??
+		readBoolean(context.state.answers.workspacePublishIncludeInternal) ??
+		false;
+	const releaseType =
+		readString(params.releaseType) ??
+		readString(context.state.answers.workspacePublishReleaseType) ??
+		"patch";
+	const prereleaseId =
+		readString(params.prereleaseId) ??
+		readString(context.state.answers.workspacePublishPrereleaseId) ??
+		"rc";
+	const skipConfirm =
+		readBoolean(params.skipConfirm) ??
+		readBoolean(context.state.answers.workspacePublishSkipVersionConfirm) ??
+		false;
+	const tagTemplate =
+		readString(params.tagTemplate) ??
+		DEFAULT_PUBLISH_TAG_TEMPLATE;
+
+	const manifest = await readWorkspaceManifest(manifestPath);
+	const entries = manifest.filter((entry) =>
+		shouldProcessPublishEntry(entry, { filters, includeInternal }),
+	);
+
+	if (entries.length === 0) {
+		log.warn("[workspace-bump] manifest is empty; nothing to bump.");
+		return;
+	}
+
+	const bumps: Array<{ name: string; relPath: string; from?: string; to: string }> = [];
+
+	for (const entry of entries) {
+		const relPath = readString(entry.path);
+		const pkgName = readString(entry.name) ?? relPath ?? "(unknown)";
+		if (!relPath) {
+			log.warn(`[workspace-bump] skipping ${pkgName}: missing path.`);
+			continue;
+		}
+		const pkgJsonPath = path.resolve(repoRoot, relPath, "package.json");
+		if (!(await pathExists(pkgJsonPath))) {
+			log.warn(`[workspace-bump] ${pkgName}: package.json not found; skipping.`);
+			continue;
+		}
+		const pkgRaw = await fs.readFile(pkgJsonPath, "utf8");
+		const pkg = JSON.parse(pkgRaw) as { version?: string };
+		const current = pkg.version;
+		const next = computeNextVersion(current, releaseType, prereleaseId);
+		bumps.push({ name: pkgName, relPath, from: current, to: next });
+	}
+
+	if (bumps.length === 0) {
+		log.warn("[workspace-bump] no eligible packages found to bump.");
+		return;
+	}
+
+	if (!skipConfirm) {
+		const summary = bumps
+			.map((b) => `- ${b.name}: ${b.from ?? "0.0.0"} → ${b.to}`)
+			.join("\n");
+		log.info(`[workspace-bump] planned version bumps:\n${summary}`);
+	}
+
+	for (const bump of bumps) {
+		const pkgDir = path.resolve(repoRoot, bump.relPath);
+		log.info(`[workspace-bump] ${bump.name}: ${bump.from ?? "none"} → ${bump.to}`);
+		if (dryRun) {
+			continue;
+		}
+		await runCommand(
+			"pnpm",
+			["version", bump.to, "--no-git-tag-version"],
+			{ cwd: pkgDir, dryRun, log },
+		);
+		const tag = tagTemplate.replace("${name}", bump.name).replace("${version}", bump.to);
+		if (tag && tag.trim().length > 0) {
+			await runCommand("git", ["tag", "-f", tag], { cwd: pkgDir, dryRun, log });
+		}
+	}
+
+	log.success("[workspace-bump] done");
+}
+
+function computeNextVersion(
+	current: string | undefined,
+	releaseType: string,
+	preid: string,
+): string {
+	const base = current && semver.valid(current) ? current : "0.0.0";
+	if (releaseType === "manual") {
+		return base;
+	}
+	if (releaseType === "prerelease") {
+		return semver.inc(base, "prerelease", preid) ?? base;
+	}
+	const bumpType = releaseType as semver.ReleaseType;
+	return semver.inc(base, bumpType) ?? base;
+}
 async function runWorkspaceSetupGlobal(
 	params: Record<string, unknown>,
 	context: WizardActionContext,
