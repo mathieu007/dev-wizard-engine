@@ -341,25 +341,23 @@ async function runWorkspacePush(
 		true;
 
 	const manifest = await readWorkspaceManifest(manifestPath);
-	const entries = manifest.filter((entry) =>
-		shouldProcessPushEntry(entry, { filters }),
-	);
-
-	const normalizedEntries = entries.map((entry) => ({
+	const normalizedEntries = manifest.map((entry) => ({
 		...entry,
 		path: normalizeWorkspacePath(readString(entry.path) ?? "", repoRoot),
 	}));
-	const hasRootEntry = normalizedEntries.some((entry) => entry.path === ".");
-	const processedEntries = includeRoot
-		? normalizedEntries.filter((entry) => entry.path !== ".")
-		: normalizedEntries;
 
-	if (entries.length === 0) {
+	const rootEntry = normalizedEntries.find((entry) => entry.path === ".");
+	const entries = normalizedEntries.filter((entry) =>
+		entry.path === "." ? false : shouldProcessPushEntry(entry, { filters }),
+	);
+
+	const hasWork = entries.length > 0;
+	if (!hasWork && !(includeRoot && rootEntry)) {
 		log.info("[workspace-push] manifest is empty; nothing to do.");
 		return;
 	}
 
-	for (const entry of processedEntries) {
+	for (const entry of entries) {
 		await processPushEntry(entry, {
 			repoRoot,
 			dryRun,
@@ -372,11 +370,12 @@ async function runWorkspacePush(
 		});
 	}
 
-	if (includeRoot && !hasRootEntry) {
+	if (includeRoot && !rootEntry) {
 		log.warn("[workspace-push] root push requested, but no root entry found in manifest; skipping root.");
 	}
 
-	if (includeRoot && hasRootEntry) {
+	if (includeRoot && rootEntry) {
+		// Push the root regardless of filters when explicitly requested.
 		await processRootRepo({
 			repoRoot,
 			dryRun,
