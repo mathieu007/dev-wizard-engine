@@ -2999,6 +2999,11 @@ async function applyCommitStrategy(cwd: string, message: string): Promise<void> 
 	await autoCommitNestedRepositories(cwd, message);
 	try {
 		await execa("git", ["add", "-A"], { cwd });
+		const status = await execa("git", ["status", "--porcelain"], { cwd });
+		if (status.stdout.trim().length === 0) {
+			// Nothing to commit; treat as success and continue without pushing.
+			return;
+		}
 		await execa("git", ["commit", "-m", message], { cwd });
 		await pushWithUpstreamFallback(cwd);
 	} catch (error) {
