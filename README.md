@@ -1,6 +1,6 @@
 # Dev Wizard Engine
 
-Runtime, configuration loader, and templating utilities that power the Dev Wizard ecosystem (no terminal UI dependencies). Consumers typically depend on `@dev-wizard/engine` for programmatic automation, and pair it with `@dev-wizard/ui-terminal` when interactive prompts are needed.
+Runtime, configuration loader, and templating utilities that power the Dev Wizard ecosystem (no terminal UI dependencies). Consumers typically depend on `@ScaffoldStack/dev-wizard-engine` for programmatic automation, and pair it with `@ScaffoldStack/ui-terminal` when interactive prompts are needed.
 
 ## Features
 
@@ -19,7 +19,7 @@ import {
   loadConfig,
   describeWizard,
   lintWizard,
-} from "@dev-wizard/engine";
+} from "@ScaffoldStack/dev-wizard-engine";
 
 const resolution = await resolveConfigPaths();
 const config = await loadConfig({ configPaths: resolution.paths });
@@ -34,11 +34,11 @@ See `packages/dev-wizard-core/docs/dev-wizard.md` for end-to-end documentation a
 
 ## Publishing
 
-The engine package is versioned and released alongside `@dev-wizard/ui-terminal` and `@dev-wizard/cli`. Use the workspace scripts:
+The engine package is versioned and released alongside `@ScaffoldStack/ui-terminal` and `@ScaffoldStack/dev-wizard-cli`. Use the workspace scripts:
 
 ```bash
 pnpm dev-wizard:ci
 pnpm dev-wizard:release:prepare <version>
 pnpm dev-wizard:publish:dry-run
-pnpm --filter @dev-wizard/engine publish --access public
+pnpm --filter @ScaffoldStack/dev-wizard-engine publish --access public
 ```

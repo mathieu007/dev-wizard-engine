@@ -110,7 +110,7 @@ async function loadConfigRecursive({
 
 	if (LEGACY_LIBRARY_WRAPPER_PATTERN.test(absolutePath)) {
 		onWarning?.(
-			`"${absolutePath}" is a legacy sample wrapper config. Prefer importing the matching @dev-wizard/presets/* config directly.`,
+			`"${absolutePath}" is a legacy sample wrapper config. Prefer importing the matching@ScaffoldStack/dev-wizard-presets/* config directly.`,
 		);
 	}
 

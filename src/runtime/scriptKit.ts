@@ -344,7 +344,7 @@ function resolveProjectsPresetPath(specifier: string): string {
 		return nodeRequire.resolve(specifier);
 	} catch (error) {
 		throw new WizardScriptError(
-			`Failed to resolve projects preset "${specifier}". Ensure @dev-wizard/presets is installed or provide an explicit configPath.`,
+			`Failed to resolve projects preset "${specifier}". Ensure@ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}
@@ -355,7 +355,7 @@ function resolveMaintenancePresetPath(specifier: string): string {
 		return nodeRequire.resolve(specifier);
 	} catch (error) {
 		throw new WizardScriptError(
-			`Failed to resolve maintenance preset "${specifier}". Ensure @dev-wizard/presets is installed or provide an explicit configPath.`,
+			`Failed to resolve maintenance preset "${specifier}". Ensure@ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}
@@ -366,7 +366,7 @@ function resolveWorkspacePresetPath(specifier: string): string {
 		return nodeRequire.resolve(specifier);
 	} catch (error) {
 		throw new WizardScriptError(
-			`Failed to resolve workspace preset "${specifier}". Ensure @dev-wizard/presets is installed or provide an explicit configPath.`,
+			`Failed to resolve workspace preset "${specifier}". Ensure@ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}

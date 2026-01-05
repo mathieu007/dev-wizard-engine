@@ -53,13 +53,13 @@ describe("getWorkflowPreviewCommand", () => {
 	it("builds project-scoped maintenance commands", () => {
 		const commands = getWorkflowCommands("maintenance", {
 			repoRoot: "/repo",
-			project: { id: "packages/dev-wizard-cli", label: "@dev-wizard/cli" },
+			project: { id: "packages/dev-wizard-cli", label: "@ScaffoldStack/dev-wizard-cli" },
 			promptOverrides: {
 				maintenanceWindowMode: "auto",
 			},
 		});
 		expect(commands).toBeDefined();
-		expect(commands?.run).toContain("--filter '@dev-wizard/cli'");
+		expect(commands?.run).toContain("--filter '@ScaffoldStack/dev-wizard-cli'");
 		expect(commands?.run).toContain("/repo/packages/dev-wizard-presets/maintenance/index.yaml");
 		expect(commands?.run).not.toContain("--answers");
 		expect(commands?.preview).toContain("--plan");
@@ -71,7 +71,7 @@ describe("getWorkflowPreviewCommand", () => {
 		const { repoRoot, answersPath } = await createAnswersFixture();
 		const commands = getWorkflowCommands("maintenance", {
 			repoRoot,
-			project: { id: "packages/dev-wizard-cli", label: "@dev-wizard/cli" },
+			project: { id: "packages/dev-wizard-cli", label: "@ScaffoldStack/dev-wizard-cli" },
 			promptOverrides: {
 				maintenanceWindowMode: "auto",
 			},
@@ -88,7 +88,7 @@ describe("getWorkflowPreviewCommand", () => {
 		const { repoRoot, answersPath } = await createAnswersFixture();
 		const commands = getWorkflowCommands("maintenance", {
 			repoRoot,
-			project: { id: "packages/dev-wizard-cli", label: "@dev-wizard/cli" },
+			project: { id: "packages/dev-wizard-cli", label: "@ScaffoldStack/dev-wizard-cli" },
 			promptOverrides: {
 				maintenanceWindowMode: "manual",
 				maintenanceWindowCadence: "weekly",
@@ -105,7 +105,7 @@ describe("getWorkflowPreviewCommand", () => {
 	it("strips wrapping quotes from inline override values", () => {
 		const commands = getWorkflowCommands("maintenance", {
 			repoRoot: "/repo",
-			project: { id: "packages/dev-wizard-cli", label: "@dev-wizard/cli" },
+			project: { id: "packages/dev-wizard-cli", label: "@ScaffoldStack/dev-wizard-cli" },
 			promptOverrides: {
 				maintenanceWindow: '"2025-11-21-daily-maintenance"',
 				upgradeBranchName: "'2025-11-12-daily-maintenance'-deps-upgrade",
@@ -118,7 +118,7 @@ describe("getWorkflowPreviewCommand", () => {
 	it("ignores maintenance overrides for non-maintenance workflows", () => {
 		const commands = getWorkflowCommands("git-commit", {
 			repoRoot: "/repo",
-			project: { id: "packages/dev-wizard-cli", label: "@dev-wizard/cli" },
+			project: { id: "packages/dev-wizard-cli", label: "@ScaffoldStack/dev-wizard-cli" },
 			promptOverrides: {
 				maintenanceWindowMode: "auto",
 			},

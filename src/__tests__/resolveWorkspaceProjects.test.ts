@@ -16,8 +16,8 @@ describe("resolveWorkspaceProjects script", () => {
 		});
 
 		expect(resolved).toEqual([
-			{ id: "packages/dev-wizard-core", label: "@dev-wizard/core" },
-			{ id: "packages/dev-wizard-cli", label: "@dev-wizard/cli" },
+			{ id: "packages/dev-wizard-core", label: "@ScaffoldStack/dev-wizard-core" },
+			{ id: "packages/dev-wizard-cli", label: "@ScaffoldStack/dev-wizard-cli" },
 		]);
 	});
 
