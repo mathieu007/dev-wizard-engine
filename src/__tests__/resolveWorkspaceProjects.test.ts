@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import path from "node:path";
-import { resolveWorkspaceProjects } from "@ScaffoldStack/dev-wizard-preset/scripts/resolveWorkspaceProjects";
+import { resolveWorkspaceProjects } from "@ScaffoldStack/dev-wizard-presets/scripts/resolveWorkspaceProjects";
 
 describe("resolveWorkspaceProjects script", () => {
 	it("returns the selected projects with labels", async () => {
@@ -33,7 +33,7 @@ describe("resolveWorkspaceProjects script", () => {
 			maxDepth: 3,
 		});
 
-		expect(resolved.find((entry) => entry.id === "packages/dev-wizard-core")).toBeDefined();
-		expect(resolved.find((entry) => entry.id === "packages/dev-wizard-cli")).toBeDefined();
+  expect(resolved.find((entry: { id: string }) => entry.id === "packages/dev-wizard-core")).toBeDefined();
+  expect(resolved.find((entry: { id: string }) => entry.id === "packages/dev-wizard-cli")).toBeDefined();
 	});
 });
