@@ -299,7 +299,7 @@ flows:
 		const messages = result.issues.map((issue) => issue.message);
 		expect(
 			messages.some((message) =>
-				message.includes("@dev-wizard/presets/scripts"),
+				message.includes("@ScaffoldStack/dev-wizard-preset/scripts"),
 			),
 		).toBe(true);
 	});
@@ -328,7 +328,7 @@ flows:
 			.filter(
 				(issue) =>
 					issue.message.startsWith("Command step") &&
-					issue.message.includes("@dev-wizard/presets/scripts"),
+					issue.message.includes("@ScaffoldStack/dev-wizard-preset/scripts"),
 			)
 			.map((issue) => issue.message);
 		expect(messages).toHaveLength(2);

@@ -267,14 +267,14 @@ describe("script helpers", () => {
 describe("projects orchestrator helpers", () => {
 	test("createProjectsOrchestratorOptions merges overrides", async () => {
 		const options = await createProjectsOrchestratorOptions({
-			configPath: "/repo/node_modules/@dev-wizard/presets/projects/index.yaml",
+			configPath: "/repo/node_modules/@ScaffoldStack/dev-wizard-preset/projects/index.yaml",
 			workflows: ["maintenance"],
 			projects: ["packages/app"],
 			overrides: { maintenanceWindow: "weekly" },
 			devWizardOptions: { dryRun: true },
 		});
 
-		expect(options.configPath).toBe("/repo/node_modules/@dev-wizard/presets/projects/index.yaml");
+		expect(options.configPath).toBe("/repo/node_modules/@ScaffoldStack/dev-wizard-preset/projects/index.yaml");
 		expect(options.scenario).toBe("multi-project-orchestration");
 		expect(options.overrides).toEqual(
 			expect.objectContaining({
@@ -295,7 +295,7 @@ describe("projects orchestrator helpers", () => {
 		]);
 
 		const options = await createProjectsOrchestratorOptions({
-			configPath: "/repo/node_modules/@dev-wizard/presets/projects/index.yaml",
+			configPath: "/repo/node_modules/@ScaffoldStack/dev-wizard-preset/projects/index.yaml",
 			repoRoot: "/repo",
 			selectAllProjects: true,
 		});
@@ -313,7 +313,7 @@ describe("projects orchestrator helpers", () => {
 describe("maintenance helpers", () => {
 	test("createMaintenanceOptions merges overrides", async () => {
 		const options = await createMaintenanceOptions({
-			configPath: "/repo/node_modules/@dev-wizard/presets/maintenance/index.yaml",
+			configPath: "/repo/node_modules/@ScaffoldStack/dev-wizard-preset/maintenance/index.yaml",
 			overrides: {
 				maintenanceWindowMode: "manual",
 				maintenanceTasks: ["upgrade-dependencies"],
@@ -325,7 +325,7 @@ describe("maintenance helpers", () => {
 		});
 
 		expect(options.configPath).toBe(
-			"/repo/node_modules/@dev-wizard/presets/maintenance/index.yaml",
+			"/repo/node_modules/@ScaffoldStack/dev-wizard-preset/maintenance/index.yaml",
 		);
 		expect(options.scenario).toBe("maintenance-window");
 		expect(options.overrides).toEqual(

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	getWorkflowPreviewCommand,
 	getWorkflowCommands,
-} from "@dev-wizard/presets/scripts/previewWorkflowCommand";
+} from "@ScaffoldStack/dev-wizard-preset/scripts/previewWorkflowCommand";
 
 const tempDirs: string[] = [];
 

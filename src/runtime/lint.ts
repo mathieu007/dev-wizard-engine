@@ -958,7 +958,7 @@ function validateCommandStep(
 		if (LEGACY_LIBRARY_SCRIPT_PATTERN.test(command.run)) {
 			issues.push({
 				level: "warning",
-				message: `Command step "${step.id}" in flow "${flowId}" references packages/dev-wizard-core/examples/library/scripts/* which are no longer shipped here. Update the command to call '@dev-wizard/presets/scripts/*' instead.`,
+				message: `Command step "${step.id}" in flow "${flowId}" references packages/dev-wizard-core/examples/library/scripts/* which are no longer shipped here. Update the command to call '@ScaffoldStack/dev-wizard-preset/scripts/*' instead.`,
 				file,
 			});
 		}

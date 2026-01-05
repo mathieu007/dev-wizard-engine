@@ -104,7 +104,7 @@ async function loadConfigRecursive({
 
 	if (absolutePath.endsWith("shared-maintenance.flows.yaml")) {
 		onWarning?.(
-			`"${absolutePath}" is deprecated and no longer shipped here. Import '@dev-wizard/presets/maintenance' directly instead of referencing the legacy shared-maintenance file.`,
+			`"${absolutePath}" is deprecated and no longer shipped here. Import '@ScaffoldStack/dev-wizard-preset/maintenance' directly instead of referencing the legacy shared-maintenance file.`,
 		);
 	}
 
@@ -116,7 +116,7 @@ async function loadConfigRecursive({
 
 	if (source.includes("examples/library/scripts/")) {
 		onWarning?.(
-			`"${absolutePath}" references scripts under packages/dev-wizard-core/examples/library/scripts, which are no longer shipped here. Update commands to use '@dev-wizard/presets/scripts/*'.`,
+			`"${absolutePath}" references scripts under packages/dev-wizard-core/examples/library/scripts, which are no longer shipped here. Update commands to use '@ScaffoldStack/dev-wizard-preset/scripts/*'.`,
 		);
 	}
 

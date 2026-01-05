@@ -9,11 +9,11 @@ import type { DevWizardOptions } from "./types.js";
 import { listWorkspaceProjects } from "./workspaceProjects.js";
 
 const nodeRequire = createRequire(import.meta.url);
-const PROJECTS_PRESET_SPECIFIER = "@dev-wizard/presets/projects";
+const PROJECTS_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-preset/projects";
 const PROJECTS_SCENARIO_ID = "multi-project-orchestration";
-const MAINTENANCE_PRESET_SPECIFIER = "@dev-wizard/presets/maintenance";
+const MAINTENANCE_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-preset/maintenance";
 const MAINTENANCE_SCENARIO_ID = "maintenance-window";
-const WORKSPACE_PRESET_SPECIFIER = "@dev-wizard/presets/workspace";
+const WORKSPACE_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-preset/workspace";
 const WORKSPACE_BOOTSTRAP_SCENARIO_ID = "workspace-bootstrap";
 
 export interface DefineWizardCommandInput {

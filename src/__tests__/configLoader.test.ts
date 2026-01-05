@@ -58,7 +58,7 @@ describe("loadConfig", () => {
 		await fs.mkdir(presetsDir, { recursive: true });
 		await fs.writeFile(
 			path.join(presetsDir, "package.json"),
-			JSON.stringify({ name: "@dev-wizard/presets", version: "0.0.0", main: "index.js" }),
+			JSON.stringify({ name: "@ScaffoldStack/dev-wizard-preset", version: "0.0.0", main: "index.js" }),
 		);
 		await fs.writeFile(path.join(presetsDir, "index.js"), "module.exports = {};");
 		await fs.writeFile(
@@ -69,7 +69,7 @@ describe("loadConfig", () => {
 		const mainPath = path.join(tmpDir, "main.yaml");
 		await fs.writeFile(
 			mainPath,
-			`meta:\n  name: Main\n  version: 1.0.0\nimports:\n  - '@dev-wizard/presets'\nscenarios: []\nflows: {}\n`,
+			`meta:\n  name: Main\n  version: 1.0.0\nimports:\n  - '@ScaffoldStack/dev-wizard-preset'\nscenarios: []\nflows: {}\n`,
 		);
 
 		const config = await loadConfig({
