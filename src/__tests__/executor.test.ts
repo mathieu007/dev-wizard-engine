@@ -2264,7 +2264,6 @@ describe("checkpoints and resume", () => {
 			path.join(tmpDir, "COMMIT.SUMMARY.md"),
 			"chore(repo): automation snapshot",
 		);
-
 		const configPath = path.resolve(
 			testDir,
 			"..",
