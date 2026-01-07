@@ -2140,7 +2140,7 @@ describe("checkpoints and resume", () => {
 			base: "weekly",
 		};
 
-		execaMocks.execaCommand.mockImplementation((command: unknown) => {
+		execaMocks.execaCommand.mockImplementation(async (command: unknown) => {
 			const commandText = typeof command === "string" ? command : String(command);
 			if (commandText.includes("generateMaintenanceWindow.ts")) {
 				return execaMocks.createProcess({
@@ -2214,8 +2214,7 @@ describe("checkpoints and resume", () => {
 				{ stdout: undefined, stderr: undefined },
 			);
 		const commitSummaryPath = path.join(tmpDir, "COMMIT.SUMMARY.md");
-		const commitSummary = "chore(repo): automation snapshot";
-		execaMocks.execaCommand.mockImplementation((command: unknown) => {
+		execaMocks.execaCommand.mockImplementation(async (command: unknown) => {
 			const commandText = typeof command === "string" ? command : String(command);
 			if (commandText.includes("previewWorkflowCommand.ts")) {
 				return createProcess('{"preview":"cmd","run":"cmd"}');
@@ -2229,7 +2228,8 @@ describe("checkpoints and resume", () => {
 				return createProcess("clean");
 			}
 			if (commandText.includes("commitMessageFile.ts")) {
-				return createProcess(commitSummary);
+				const message = await fs.readFile(commitSummaryPath, "utf8");
+				return createProcess(message);
 			}
 			if (commandText.includes("printf 'null'")) {
 				return createProcess("null");
@@ -2260,7 +2260,10 @@ describe("checkpoints and resume", () => {
 			path.join(tmpDir, "packages/app/package.json"),
 			JSON.stringify({ name: "app" }),
 		);
-		await fs.writeFile(commitSummaryPath, commitSummary);
+		await fs.writeFile(
+			path.join(tmpDir, "COMMIT.SUMMARY.md"),
+			"chore(repo): automation snapshot",
+		);
 		const configPath = path.resolve(
 			testDir,
 			"..",
