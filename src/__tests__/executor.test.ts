@@ -2140,7 +2140,7 @@ describe("checkpoints and resume", () => {
 			base: "weekly",
 		};
 
-		execaMocks.execaCommand.mockImplementation((command: unknown) => {
+		execaMocks.execaCommand.mockImplementation(async (command: unknown) => {
 			const commandText = typeof command === "string" ? command : String(command);
 			if (commandText.includes("generateMaintenanceWindow.ts")) {
 				return execaMocks.createProcess({
