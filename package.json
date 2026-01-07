@@ -64,6 +64,7 @@
     "build": "pnpm exec tsc -p tsconfig.build.json --pretty false --incremental --tsBuildInfoFile /home/math/projects/dev-workspace/.dev-wizard/cache/tsbuildinfo/_ScaffoldStack_dev-wizard-engine.tsbuildinfo",
     "clean": "rimraf dist src/**/*.js src/**/*.js.map src/**/*.d.ts",
     "lint": "eslint src --ext .ts --max-warnings=0",
+    "clean:all": "rm -rf ./node_modules .pnpm-store .turbo .turbo-cache .cache .next .output dist build coverage .reports",
     "prepublishOnly": "pnpm run build",
     "test": "pnpm exec vitest run --passWithNoTests --config /home/math/projects/dev-workspace/packages/dev-wizard-engine/tsconfig.test.json",
     "typecheck": "tsc -p tsconfig.test.json",

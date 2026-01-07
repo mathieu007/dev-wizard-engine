@@ -7,11 +7,11 @@ export default defineConfig({
 	resolve: {
 		alias: [
 			{
-				find: /^@dev-wizard\/engine$/,
+				find: /^@ScaffoldStack/dev-wizard-engine$/,
 				replacement: path.join(engineRoot, "index.ts"),
 			},
 			{
-				find: /^@dev-wizard\/engine\/(.*)$/,
+				find: /^@ScaffoldStack/dev-wizard-engine\/(.*)$/,
 				replacement: `${engineRoot}/$1`,
 			},
 		],
