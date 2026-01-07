@@ -61,12 +61,16 @@
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm exec tsc -p tsconfig.build.json --pretty false --incremental --tsBuildInfoFile /home/math/projects/dev-workspace/.dev-wizard/cache/tsbuildinfo/_ScaffoldStack_dev-wizard-engine.tsbuildinfo",
     "clean": "rimraf dist src/**/*.js src/**/*.js.map src/**/*.d.ts",
     "lint": "eslint src --ext .ts --max-warnings=0",
     "prepublishOnly": "pnpm run build",
-    "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc -p tsconfig.test.json"
+    "test": "pnpm exec vitest run --passWithNoTests --config /home/math/projects/dev-workspace/packages/dev-wizard-engine/tsconfig.test.json",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "build:quick": "pnpm exec tsc -p tsconfig.build.json --pretty false --incremental --tsBuildInfoFile /home/math/projects/dev-workspace/.dev-wizard/cache/tsbuildinfo/_ScaffoldStack_dev-wizard-engine.tsbuildinfo",
+    "build:turbo": "TURBO_TS_CONFIG=tsconfig.build.json pnpm dlx turbo run build --filter @ScaffoldStack/dev-wizard-engine || pnpm exec tsc -p tsconfig.build.json --pretty false --incremental --tsBuildInfoFile /home/math/projects/dev-workspace/.dev-wizard/cache/tsbuildinfo/_ScaffoldStack_dev-wizard-engine.tsbuildinfo",
+    "test:quick": "pnpm exec vitest run --passWithNoTests --changed --config /home/math/projects/dev-workspace/packages/dev-wizard-engine/tsconfig.test.json",
+    "test:turbo": "pnpm dlx turbo run test --filter @ScaffoldStack/dev-wizard-engine"
   },
   "dependencies": {
     "chalk": "^5.6.2",

@@ -7,24 +7,31 @@ Flow: git-commit-push
   - [prompt:input] choose-commit-file
     question: Path to the commit message file?
     default answer: 
+  - [command] prepare-commit-message-file
+    • node -e "const path=require('node:path'); const target=""; const repo="/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"; const resolved=path.isAbsolute(target)?target:path.resolve(repo, target); process.stdout.write(resolved);"
+
+      details: (hidden — use --plan-expand templates)
+    • pnpm exec tsx packages/dev-wizard-presets/scripts/commitMessageFile.ts --path ""
+
+      details: (hidden — use --plan-expand templates)
   - [message] warning
     level: info
     text: Dev Wizard will run \`git add .\`, \`git commit -F <file>\`, and \`git push\`. Make sure your current branch and remote are correct before continuing.
 
   - [command] commit-and-push
     • git add .
+      details: (hidden — use --plan-expand templates)
     • git commit -F ""
+      details: (hidden — use --plan-expand templates)
     • git push
+      details: (hidden — use --plan-expand templates)
   - [prompt:confirm] clear-message-confirm
     question: Clear the commit message file after a successful push?
     default answer: false
   - [branch] clear-message-routing
     branch rationales: (hidden — use --plan-expand branches)
-    default → complete
-    selected → complete
-  - [message] complete
-    level: success
-    text: Git commit workflow complete.
+    default → exit
+    selected → exit
 "
 `;
 
@@ -32,14 +39,16 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
 "{"type":"plan.meta","data":{"scenarioId":"git-commit-push","scenarioLabel":"Commit & Push","targetMode":"dry-run"}}
 {"type":"plan.flow","flowId":"git-commit-push","data":{"stepCount":7,"nested":false}}
 {"type":"plan.step","flowId":"git-commit-push","stepId":"choose-commit-file","data":{"kind":"prompt","mode":"input","answerSource":"default","required":false}}
+{"type":"plan.step","flowId":"git-commit-push","stepId":"prepare-commit-message-file","data":{"kind":"command","commandCount":2}}
+{"type":"plan.command","flowId":"git-commit-push","stepId":"prepare-commit-message-file","data":{"index":0,"run":"node -e \\"const path=require('node:path'); const target=\\"\\"; const repo=\\"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push\\"; const resolved=path.isAbsolute(target)?target:path.resolve(repo, target); process.stdout.write(resolved);\\"\\n","cwd":"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"}}
+{"type":"plan.command","flowId":"git-commit-push","stepId":"prepare-commit-message-file","data":{"index":1,"run":"pnpm exec tsx packages/dev-wizard-presets/scripts/commitMessageFile.ts --path \\"\\"\\n","cwd":"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"}}
 {"type":"plan.step","flowId":"git-commit-push","stepId":"warning","data":{"kind":"message"}}
 {"type":"plan.step","flowId":"git-commit-push","stepId":"commit-and-push","data":{"kind":"command","commandCount":3}}
-{"type":"plan.command","flowId":"git-commit-push","stepId":"commit-and-push","data":{"index":0,"run":"git add ."}}
-{"type":"plan.command","flowId":"git-commit-push","stepId":"commit-and-push","data":{"index":1,"run":"git commit -F \\"\\""}}
-{"type":"plan.command","flowId":"git-commit-push","stepId":"commit-and-push","data":{"index":2,"run":"git push"}}
+{"type":"plan.command","flowId":"git-commit-push","stepId":"commit-and-push","data":{"index":0,"run":"git add .","cwd":"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"}}
+{"type":"plan.command","flowId":"git-commit-push","stepId":"commit-and-push","data":{"index":1,"run":"git commit -F \\"\\"","cwd":"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"}}
+{"type":"plan.command","flowId":"git-commit-push","stepId":"commit-and-push","data":{"index":2,"run":"git push","cwd":"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"}}
 {"type":"plan.step","flowId":"git-commit-push","stepId":"clear-message-confirm","data":{"kind":"prompt","mode":"confirm","answerSource":"default","required":false}}
-{"type":"plan.step","flowId":"git-commit-push","stepId":"clear-message-routing","data":{"kind":"branch","selectedTarget":"complete"}}
-{"type":"plan.step","flowId":"git-commit-push","stepId":"complete","data":{"kind":"message"}}
+{"type":"plan.step","flowId":"git-commit-push","stepId":"clear-message-routing","data":{"kind":"branch","selectedTarget":"exit"}}
 {"type":"plan.preferences","data":{"expandEnv":false,"expandTemplates":false,"expandBranches":false}}
 {"type":"plan.summary","data":{"warnings":[],"pendingPromptCount":0}}"
 `;
@@ -74,6 +83,28 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
           "defaultValue": ""
         },
         {
+          "kind": "command",
+          "id": "prepare-commit-message-file",
+          "commands": [
+            {
+              "index": 0,
+              "name": "resolve-commit-message-file",
+              "run": "node -e \\"const path=require('node:path'); const target=\\"\\"; const repo=\\"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push\\"; const resolved=path.isAbsolute(target)?target:path.resolve(repo, target); process.stdout.write(resolved);\\"\\n",
+              "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push",
+              "continueOnFail": false,
+              "storeStdoutAs": "resolvedCommitMessageFile"
+            },
+            {
+              "index": 1,
+              "name": "ensure-commit-message-file",
+              "run": "pnpm exec tsx packages/dev-wizard-presets/scripts/commitMessageFile.ts --path \\"\\"\\n",
+              "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push",
+              "continueOnFail": false,
+              "storeStdoutAs": "commitMessageContent"
+            }
+          ]
+        },
+        {
           "kind": "message",
           "id": "warning",
           "level": "info",
@@ -86,16 +117,19 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
             {
               "index": 0,
               "run": "git add .",
+              "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push",
               "continueOnFail": false
             },
             {
               "index": 1,
               "run": "git commit -F \\"\\"",
+              "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push",
               "continueOnFail": false
             },
             {
               "index": 2,
               "run": "git push",
+              "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push",
               "continueOnFail": false
             }
           ]
@@ -121,14 +155,8 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
               "target": "clear-message-file"
             }
           ],
-          "defaultTarget": "complete",
-          "selectedTarget": "complete"
-        },
-        {
-          "kind": "message",
-          "id": "complete",
-          "level": "success",
-          "text": "Git commit workflow complete."
+          "defaultTarget": "exit",
+          "selectedTarget": "exit"
         }
       ]
     }
@@ -164,6 +192,35 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
     {
       "type": "plan.step",
       "flowId": "git-commit-push",
+      "stepId": "prepare-commit-message-file",
+      "data": {
+        "kind": "command",
+        "commandCount": 2
+      }
+    },
+    {
+      "type": "plan.command",
+      "flowId": "git-commit-push",
+      "stepId": "prepare-commit-message-file",
+      "data": {
+        "index": 0,
+        "run": "node -e \\"const path=require('node:path'); const target=\\"\\"; const repo=\\"/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push\\"; const resolved=path.isAbsolute(target)?target:path.resolve(repo, target); process.stdout.write(resolved);\\"\\n",
+        "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"
+      }
+    },
+    {
+      "type": "plan.command",
+      "flowId": "git-commit-push",
+      "stepId": "prepare-commit-message-file",
+      "data": {
+        "index": 1,
+        "run": "pnpm exec tsx packages/dev-wizard-presets/scripts/commitMessageFile.ts --path \\"\\"\\n",
+        "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"
+      }
+    },
+    {
+      "type": "plan.step",
+      "flowId": "git-commit-push",
       "stepId": "warning",
       "data": {
         "kind": "message"
@@ -184,7 +241,8 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
       "stepId": "commit-and-push",
       "data": {
         "index": 0,
-        "run": "git add ."
+        "run": "git add .",
+        "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"
       }
     },
     {
@@ -193,7 +251,8 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
       "stepId": "commit-and-push",
       "data": {
         "index": 1,
-        "run": "git commit -F \\"\\""
+        "run": "git commit -F \\"\\"",
+        "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"
       }
     },
     {
@@ -202,7 +261,8 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
       "stepId": "commit-and-push",
       "data": {
         "index": 2,
-        "run": "git push"
+        "run": "git push",
+        "cwd": "/home/math/projects/dev-workspace/packages/dev-wizard-presets/git-commit-push"
       }
     },
     {
@@ -222,15 +282,7 @@ exports[`plan compiler golden outputs > renders stable plan outputs for the git-
       "stepId": "clear-message-routing",
       "data": {
         "kind": "branch",
-        "selectedTarget": "complete"
-      }
-    },
-    {
-      "type": "plan.step",
-      "flowId": "git-commit-push",
-      "stepId": "complete",
-      "data": {
-        "kind": "message"
+        "selectedTarget": "exit"
       }
     }
   ]

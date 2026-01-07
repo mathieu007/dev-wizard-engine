@@ -9,11 +9,11 @@ import type { DevWizardOptions } from "./types.js";
 import { listWorkspaceProjects } from "./workspaceProjects.js";
 
 const nodeRequire = createRequire(import.meta.url);
-const PROJECTS_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-preset/projects";
+const PROJECTS_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-presets/projects";
 const PROJECTS_SCENARIO_ID = "multi-project-orchestration";
-const MAINTENANCE_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-preset/maintenance";
+const MAINTENANCE_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-presets/maintenance";
 const MAINTENANCE_SCENARIO_ID = "maintenance-window";
-const WORKSPACE_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-preset/workspace";
+const WORKSPACE_PRESET_SPECIFIER = "@ScaffoldStack/dev-wizard-presets/workspace";
 const WORKSPACE_BOOTSTRAP_SCENARIO_ID = "workspace-bootstrap";
 
 export interface DefineWizardCommandInput {
@@ -344,7 +344,7 @@ function resolveProjectsPresetPath(specifier: string): string {
 		return nodeRequire.resolve(specifier);
 	} catch (error) {
 		throw new WizardScriptError(
-			`Failed to resolve projects preset "${specifier}". Ensure@ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
+			`Failed to resolve projects preset "${specifier}". Ensure @ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}
@@ -355,7 +355,7 @@ function resolveMaintenancePresetPath(specifier: string): string {
 		return nodeRequire.resolve(specifier);
 	} catch (error) {
 		throw new WizardScriptError(
-			`Failed to resolve maintenance preset "${specifier}". Ensure@ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
+			`Failed to resolve maintenance preset "${specifier}". Ensure @ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}
@@ -366,7 +366,7 @@ function resolveWorkspacePresetPath(specifier: string): string {
 		return nodeRequire.resolve(specifier);
 	} catch (error) {
 		throw new WizardScriptError(
-			`Failed to resolve workspace preset "${specifier}". Ensure@ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
+			`Failed to resolve workspace preset "${specifier}". Ensure @ScaffoldStack/dev-wizard-presets is installed or provide an explicit configPath.`,
 			{ cause: error },
 		);
 	}

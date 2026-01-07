@@ -107,6 +107,26 @@ export function registerWorkspaceActions(): void {
 		}),
 		run: runWorkspaceSetupGlobal,
 	});
+
+	registerAction({
+		id: "workspace-build-sweep",
+		label: "Workspace build sweep",
+		plan: (params, context) => ({
+			summary: "Build selected workspace projects",
+			details: buildWorkspacePlanDetails(params, context),
+		}),
+		run: runWorkspaceBuildSweep,
+	});
+
+	registerAction({
+		id: "workspace-test-sweep",
+		label: "Workspace test sweep",
+		plan: (params, context) => ({
+			summary: "Run tests across selected workspace projects",
+			details: buildWorkspacePlanDetails(params, context),
+		}),
+		run: runWorkspaceTestSweep,
+	});
 }
 
 function buildWorkspacePlanDetails(
@@ -232,6 +252,587 @@ async function runWorkspaceSetup(
 	}
 
 	log.success("[workspace-setup] done");
+}
+
+async function runWorkspaceBuildSweep(
+	params: Record<string, unknown>,
+	context: WizardActionContext,
+): Promise<void> {
+	ensureWorkspaceActionsRegistered();
+	const log = context.log;
+	const dryRun = resolveDryRun(params, context);
+	const repoRoot = resolveRepoRoot(params, context);
+	const manifestPath = resolveManifestPath(params, context);
+	const buildModes =
+		readStringArray(params.buildModes) ??
+		readStringArray(context.state.answers.buildSweepModes) ??
+		["normal", "turbo"];
+	const tsconfig =
+		readString(params.tsconfig) ??
+		readString(context.state.answers.buildSweepTsconfig) ??
+		"tsconfig.build.json";
+	const cacheBase =
+		readString(params.cacheBase) ??
+		readString(context.state.answers.buildSweepCacheBase) ??
+		".dev-wizard/cache";
+	const writeScripts =
+		readBoolean(params.writeScripts) ??
+		readBoolean(context.state.answers.buildSweepWriteScripts) ??
+		true;
+	const overwriteScripts =
+		readBoolean(params.overwriteScripts) ??
+		readBoolean(context.state.answers.buildSweepOverwriteScripts) ??
+		true;
+	const runBuilds =
+		readBoolean(params.runBuilds) ??
+		readBoolean(context.state.answers.buildSweepRunBuilds) ??
+		false;
+	const createNormalTsconfig =
+		readBoolean(params.createNormalTsconfig) ?? true;
+
+	const tsbuildinfoDir = path.resolve(repoRoot, cacheBase, "tsbuildinfo");
+	await ensureDir(tsbuildinfoDir, dryRun, log);
+
+	const manifest = await readWorkspaceManifest(manifestPath);
+	const modes = buildModes.length > 0 ? buildModes : ["normal"];
+	const filters = readStringArray(params.projects) ??
+		readStringArray(context.state.answers.buildSweepProjects);
+	const needsTurbo = modes.includes("turbo");
+
+	let selected = manifest;
+	if (filters && filters.length > 0) {
+		selected = manifest.filter((entry) =>
+			filters.some((filter) =>
+				[entry.name, entry.path].some(
+					(value) =>
+						typeof value === "string" &&
+						value.toLowerCase().includes(filter.toLowerCase()),
+				),
+			)
+		);
+		if (selected.length === 0) {
+			log.warn(
+				"[workspace-build] no manifest entries matched the selected filters; falling back to all entries.",
+			);
+			selected = manifest;
+		}
+	}
+
+	if (selected.length === 0) {
+		log.warn("[workspace-build] no matching projects to build");
+		return;
+	}
+
+	const buildErrors: string[] = [];
+	if (needsTurbo) {
+		await ensureTurboConfig(repoRoot, { dryRun, log });
+		await ensureTurboDependency(repoRoot, { dryRun, log });
+	}
+
+	// Seed helpful root scripts so users can trigger recursive builds easily.
+	const rootBuildScripts: Record<string, string> = {};
+	if (modes.includes("normal")) {
+		rootBuildScripts.build = "pnpm -r run build";
+	}
+	if (modes.includes("quick")) {
+		rootBuildScripts["build:quick"] = "pnpm -r run build:quick";
+	}
+	if (modes.includes("turbo")) {
+		rootBuildScripts["build:turbo"] =
+			`TURBO_TS_CONFIG=${tsconfig} pnpm dlx turbo run build`;
+	}
+	if (Object.keys(rootBuildScripts).length > 0) {
+		await updatePackageJsonScripts(path.join(repoRoot, "package.json"), rootBuildScripts, {
+			overwrite: overwriteScripts,
+			dryRun,
+			log,
+		});
+	}
+
+	for (const entry of selected) {
+		const relPath = readString(entry.path);
+		if (!relPath) {
+			log.warn("[workspace-build] skipping entry with missing path");
+			continue;
+		}
+		const projectDir = path.resolve(repoRoot, relPath);
+		const packageJsonPath = path.join(projectDir, "package.json");
+		const filterId = readString(entry.name) ?? relPath;
+		const safeName = makeSafeName(filterId);
+		const tsbuildinfoFile = path.join(
+			tsbuildinfoDir,
+			`${safeName}.tsbuildinfo`,
+		);
+
+		if (createNormalTsconfig && tsconfig !== "tsconfig.json") {
+			await ensureDerivedTsconfig(
+				projectDir,
+				tsconfig,
+				"tsconfig.json",
+				{ dryRun, log },
+			);
+		}
+
+		const resolvedNormalTsconfig = pickExistingTsconfig(projectDir, [
+			tsconfig,
+			"tsconfig.json",
+		]);
+		if (!resolvedNormalTsconfig) {
+			log.warn(
+				`[workspace-build] ${filterId}: no tsconfig found (tried ${tsconfig} and tsconfig.json); skipping.`,
+			);
+			continue;
+		}
+
+		const resolvedQuickTsconfig = resolvedNormalTsconfig;
+		const resolvedTurboTsconfig = resolvedNormalTsconfig;
+
+		const normalCommand = [
+			"pnpm",
+			"exec",
+			"tsc",
+			"-p",
+			resolvedNormalTsconfig,
+			"--pretty",
+			"false",
+			"--incremental",
+			"--tsBuildInfoFile",
+			tsbuildinfoFile,
+		];
+		const quickCommand = [
+			"pnpm",
+			"exec",
+			"tsc",
+			"-p",
+			resolvedQuickTsconfig,
+			"--pretty",
+			"false",
+			"--incremental",
+			"--tsBuildInfoFile",
+			tsbuildinfoFile,
+		];
+		const turboCommand = [
+			"pnpm",
+			"dlx",
+			"turbo",
+			"run",
+			"build",
+			"--filter",
+			filterId,
+		];
+		const turboEnv = { TURBO_TS_CONFIG: resolvedTurboTsconfig };
+
+		if (runBuilds) {
+			const primaryMode = modes[0] ?? "normal";
+			let commandToRun = normalCommand;
+			let env: Record<string, string> | undefined;
+			if (primaryMode === "turbo") {
+				commandToRun = turboCommand;
+				env = turboEnv;
+			} else if (primaryMode === "quick") {
+				if (!quickCommand) {
+					log.warn(
+						`[workspace-build] ${filterId}: quick tsconfig missing; skipping quick build.`,
+					);
+					commandToRun = normalCommand;
+				} else {
+					commandToRun = quickCommand;
+				}
+			}
+			log.info(`[workspace-build] building ${filterId} (${primaryMode})`);
+			try {
+				await runCommand(commandToRun[0], commandToRun.slice(1), {
+					cwd: projectDir,
+					dryRun,
+					log,
+					env,
+				});
+			} catch (error) {
+				buildErrors.push(
+					`[workspace-build] ${filterId} (${primaryMode}) failed: ${String(error)}`,
+				);
+			}
+		}
+
+		if (writeScripts) {
+			const scripts: Record<string, string> = {};
+			if (modes.includes("normal")) {
+				scripts.build = normalCommand.join(" ");
+			}
+			if (modes.includes("quick") && quickCommand) {
+				scripts["build:quick"] = quickCommand.join(" ");
+			}
+			if (modes.includes("turbo")) {
+				// Fallback to a direct tsc build if turbo is not configured or fails.
+				const fallbackBuild = [
+					"pnpm",
+					"exec",
+					"tsc",
+					"-p",
+					resolvedTurboTsconfig,
+					"--pretty",
+					"false",
+					"--incremental",
+					"--tsBuildInfoFile",
+					tsbuildinfoFile,
+				];
+				scripts["build:turbo"] =
+					`TURBO_TS_CONFIG=${resolvedTurboTsconfig} ${turboCommand.join(" ")} || ${fallbackBuild.join(" ")}`;
+			}
+			if (Object.keys(scripts).length > 0) {
+				await updatePackageJsonScripts(
+					packageJsonPath,
+					scripts,
+					{ overwrite: overwriteScripts, dryRun, log },
+				);
+			}
+		}
+	}
+
+	if (buildErrors.length > 0) {
+		throw new Error(
+			`One or more builds failed:\n${buildErrors.join("\n")}`,
+		);
+	}
+
+	log.success("[workspace-build] done");
+}
+
+async function runWorkspaceTestSweep(
+	params: Record<string, unknown>,
+	context: WizardActionContext,
+): Promise<void> {
+	ensureWorkspaceActionsRegistered();
+	const log = context.log;
+	const dryRun = resolveDryRun(params, context);
+	const repoRoot = resolveRepoRoot(params, context);
+	const manifestPath = resolveManifestPath(params, context);
+	const testModes =
+		readStringArray(params.testModes) ??
+		readStringArray(context.state.answers.testSweepModes) ??
+		["normal", "turbo"];
+	const testConfig =
+		readString(params.tsconfig) ??
+		readString(context.state.answers.testSweepTsconfig) ??
+		"vitest.config.ts";
+	const cacheBase =
+		readString(params.cacheBase) ??
+		readString(context.state.answers.testSweepCacheBase) ??
+		".dev-wizard/cache/tests";
+	const writeScripts =
+		readBoolean(params.writeScripts) ??
+		readBoolean(context.state.answers.testSweepWriteScripts) ??
+		true;
+	const overwriteScripts =
+		readBoolean(params.overwriteScripts) ??
+		readBoolean(context.state.answers.testSweepOverwriteScripts) ??
+		true;
+	const runTests =
+		readBoolean(params.runTests) ??
+		readBoolean(context.state.answers.testSweepRunTests) ??
+		false;
+
+	const manifest = await readWorkspaceManifest(manifestPath);
+	const filters = readStringArray(params.projects) ??
+		readStringArray(context.state.answers.testSweepProjects);
+	let selected = manifest;
+	if (filters && filters.length > 0) {
+		selected = manifest.filter((entry) =>
+			filters.some((filter) =>
+				[entry.name, entry.path].some(
+					(value) =>
+						typeof value === "string" &&
+						value.toLowerCase().includes(filter.toLowerCase()),
+				),
+			)
+		);
+		if (selected.length === 0) {
+			log.warn(
+				"[workspace-test] no manifest entries matched the selected filters; falling back to all entries.",
+			);
+			selected = manifest;
+		}
+	}
+
+	if (selected.length === 0) {
+		log.warn("[workspace-test] no matching projects to test");
+		return;
+	}
+
+	const testErrors: string[] = [];
+	const modes = testModes.length > 0 ? testModes : ["normal"];
+
+	for (const entry of selected) {
+		const relPath = readString(entry.path);
+		if (!relPath) {
+			log.warn("[workspace-test] skipping entry with missing path");
+			continue;
+		}
+		const projectDir = path.resolve(repoRoot, relPath);
+		const packageJsonPath = path.join(projectDir, "package.json");
+		const filterId = readString(entry.name) ?? relPath;
+		const safeName = makeSafeName(filterId);
+		const vitestCacheDir = path.resolve(
+			repoRoot,
+			cacheBase,
+			safeName,
+		);
+
+		const resolvedTestConfig = await ensureVitestConfig(
+			projectDir,
+			filterId,
+			{
+				cacheDir: vitestCacheDir,
+				preferredConfig: testConfig,
+				dryRun,
+				log,
+			},
+		);
+
+		const normalCommand = [
+			"pnpm",
+			"exec",
+			"vitest",
+			"run",
+			"--passWithNoTests",
+			"--config",
+			resolvedTestConfig,
+		];
+		const quickCommand = [
+			"pnpm",
+			"exec",
+			"vitest",
+			"run",
+			"--passWithNoTests",
+			"--changed",
+			"--config",
+			resolvedTestConfig,
+		];
+		const turboCommand = [
+			"pnpm",
+			"dlx",
+			"turbo",
+			"run",
+			"test",
+			"--filter",
+			filterId,
+		];
+
+		if (runTests) {
+			const primaryMode = modes[0] ?? "normal";
+			let commandToRun = normalCommand;
+			let env: Record<string, string> | undefined;
+			if (primaryMode === "turbo") {
+				commandToRun = turboCommand;
+			} else if (primaryMode === "quick") {
+				commandToRun = quickCommand;
+			}
+			log.info(`[workspace-test] running tests for ${filterId} (${primaryMode})`);
+			try {
+				await runCommand(commandToRun[0], commandToRun.slice(1), {
+					cwd: projectDir,
+					dryRun,
+					log,
+					env,
+				});
+			} catch (error) {
+				testErrors.push(
+					`[workspace-test] ${filterId} (${primaryMode}) failed: ${String(error)}`,
+				);
+			}
+		}
+
+		if (writeScripts) {
+			const scripts: Record<string, string> = {};
+			if (modes.includes("normal")) {
+				scripts.test = normalCommand.join(" ");
+			}
+			if (modes.includes("quick")) {
+				scripts["test:quick"] = quickCommand.join(" ");
+			}
+			if (modes.includes("turbo")) {
+				scripts["test:turbo"] = turboCommand.join(" ");
+			}
+			if (Object.keys(scripts).length > 0) {
+				await updatePackageJsonScripts(
+					packageJsonPath,
+					scripts,
+					{ overwrite: overwriteScripts, dryRun, log },
+				);
+			}
+		}
+	}
+
+	if (testErrors.length > 0) {
+		throw new Error(
+			`One or more test runs failed:\n${testErrors.join("\n")}`,
+		);
+	}
+
+	// Seed helpful root scripts for recursive test runs.
+	const rootTestScripts: Record<string, string> = {};
+	if (modes.includes("normal")) {
+		rootTestScripts.test = "pnpm -r run test";
+	}
+	if (modes.includes("quick")) {
+		rootTestScripts["test:quick"] = "pnpm -r run test:quick";
+	}
+	if (modes.includes("turbo")) {
+		rootTestScripts["test:turbo"] =
+			`TURBO_TS_CONFIG=${testConfig} pnpm dlx turbo run test`;
+	}
+	if (Object.keys(rootTestScripts).length > 0) {
+		await updatePackageJsonScripts(path.join(repoRoot, "package.json"), rootTestScripts, {
+			overwrite: overwriteScripts,
+			dryRun,
+			log,
+		});
+	}
+
+	log.success("[workspace-test] done");
+}
+
+async function ensureVitestConfig(
+	projectDir: string,
+	filterId: string,
+	opts: {
+		cacheDir: string;
+		preferredConfig?: string;
+		dryRun: boolean;
+		log: WizardActionContext["log"];
+	},
+): Promise<string> {
+	const { cacheDir, preferredConfig, dryRun, log } = opts;
+	const configPath = path.resolve(
+		projectDir,
+		preferredConfig ?? "vitest.config.ts",
+	);
+
+	if (await pathExists(configPath)) {
+		return configPath;
+	}
+
+	const cacheDirRelative = path.isAbsolute(cacheDir)
+		? path.relative(projectDir, cacheDir)
+		: cacheDir;
+	const vitestConfig = `import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+	test: {
+		include: ["src/__tests__/**/*.{test,spec}.ts"],
+		cache: { dir: "${cacheDirRelative}" },
+	},
+});
+`;
+
+	if (dryRun) {
+		log.info(`[workspace-test] (dry-run) would seed vitest config for ${filterId} at ${configPath}`);
+		return configPath;
+	}
+
+	await ensureDir(path.dirname(configPath), dryRun, log);
+	await fs.writeFile(configPath, vitestConfig, "utf8");
+	log.success(`[workspace-test] seeded vitest config for ${filterId} at ${configPath}`);
+
+	return configPath;
+}
+
+async function ensureTurboConfig(
+	repoRoot: string,
+	opts: { dryRun: boolean; log: WizardActionContext["log"] },
+): Promise<void> {
+	const { dryRun, log } = opts;
+	const turboPath = path.join(repoRoot, "turbo.json");
+	if (await pathExists(turboPath)) {
+		log.info("[workspace-build] turbo.json already present; leaving as-is.");
+		return;
+	}
+
+	const turboConfig = {
+		$schema: "https://turborepo.com/schema.json",
+		tasks: {
+			build: {
+				dependsOn: ["^build"],
+				outputs: ["dist/**", "packages/**/dist/**"],
+			},
+			lint: {
+				dependsOn: ["^lint"],
+			},
+			typecheck: {
+				dependsOn: ["^typecheck"],
+			},
+			test: {
+				dependsOn: ["^test"],
+				outputs: [".dev-wizard/cache/tests/**", "coverage/**"],
+			},
+			dev: {
+				cache: false,
+				persistent: true,
+			},
+		},
+	};
+
+	if (dryRun) {
+		log.info("[workspace-build] (dry-run) would write turbo.json");
+		return;
+	}
+
+	await fs.writeFile(turboPath, `${JSON.stringify(turboConfig, null, 2)}\n`, "utf8");
+	log.success("[workspace-build] created turbo.json for turbo builds.");
+}
+
+async function ensureTurboDependency(
+	repoRoot: string,
+	opts: { dryRun: boolean; log: WizardActionContext["log"] },
+): Promise<void> {
+	const { dryRun, log } = opts;
+	const packageJsonPath = path.join(repoRoot, "package.json");
+	if (!(await pathExists(packageJsonPath))) {
+		log.warn("[workspace-build] package.json not found; cannot add turbo dependency.");
+		return;
+	}
+
+	const raw = await fs.readFile(packageJsonPath, "utf8");
+	const pkg = JSON.parse(raw) as {
+		scripts?: Record<string, unknown>;
+		devDependencies?: Record<string, unknown>;
+	};
+
+	const scripts =
+		pkg.scripts && typeof pkg.scripts === "object"
+			? { ...(pkg.scripts as Record<string, unknown>) }
+			: {};
+	const devDeps =
+		pkg.devDependencies && typeof pkg.devDependencies === "object"
+			? { ...(pkg.devDependencies as Record<string, unknown>) }
+			: {};
+
+	let changed = false;
+	const turboVersion = "^2.7.3";
+	if (!devDeps.turbo) {
+		devDeps.turbo = turboVersion;
+		changed = true;
+	}
+	if (scripts.turbo !== "turbo") {
+		scripts.turbo = "turbo";
+		changed = true;
+	}
+
+	if (!changed) return;
+
+	const nextJson = {
+		...pkg,
+		devDependencies: devDeps,
+		scripts,
+	};
+
+	if (dryRun) {
+		log.info("[workspace-build] dry-run: ensure turbo devDependency/script in package.json");
+		return;
+	}
+
+	await fs.writeFile(packageJsonPath, `${JSON.stringify(nextJson, null, 2)}\n`, "utf8");
+	log.info("[workspace-build] ensured turbo devDependency and script in package.json");
 }
 
 async function runWorkspaceInit(
@@ -1436,6 +2037,172 @@ async function packageHasBin(packageJsonPath: string): Promise<boolean> {
 		return false;
 	}
 	return false;
+}
+
+function makeSafeName(value: string): string {
+	return value.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function pickExistingTsconfig(
+	projectDir: string,
+	candidates: string[],
+): string | undefined {
+	for (const candidate of candidates) {
+		if (!candidate) continue;
+		const absolute = path.resolve(projectDir, candidate);
+		if (fsSync.existsSync(absolute)) {
+			return path.relative(projectDir, absolute);
+		}
+	}
+	return undefined;
+}
+
+async function updatePackageJsonScripts(
+	packageJsonPath: string,
+	newScripts: Record<string, string>,
+	options: {
+		overwrite: boolean;
+		dryRun: boolean;
+		log: WizardActionContext["log"];
+	},
+): Promise<void> {
+	const { overwrite, dryRun, log } = options;
+	let packageJson: Record<string, unknown> = {};
+	let scripts: Record<string, string> = {};
+
+	if (await pathExists(packageJsonPath)) {
+		const raw = await fs.readFile(packageJsonPath, "utf8");
+		packageJson = JSON.parse(raw) as Record<string, unknown>;
+		const existingScripts = packageJson.scripts;
+		if (existingScripts && typeof existingScripts === "object") {
+			scripts = Object.fromEntries(
+				Object.entries(existingScripts as Record<string, unknown>)
+					.filter(([key, value]) => typeof value === "string")
+					.map(([key, value]) => [key, value as string]),
+			);
+		}
+	}
+
+	let changed = false;
+	for (const [key, value] of Object.entries(newScripts)) {
+		if (!overwrite && scripts[key]) {
+			continue;
+		}
+		if (scripts[key] !== value) {
+			scripts[key] = value;
+			changed = true;
+		}
+	}
+
+	if (!changed) {
+		return;
+	}
+
+	const nextJson = { ...packageJson, scripts };
+	const serialized = `${JSON.stringify(nextJson, null, 2)}\n`;
+
+	if (dryRun) {
+		log.info(`[workspace] dry-run: update ${packageJsonPath} scripts`);
+		return;
+	}
+
+	await fs.writeFile(packageJsonPath, serialized, "utf8");
+	log.info(`[workspace] updated scripts in ${packageJsonPath}`);
+}
+
+async function ensureQuickTsconfig(
+	projectDir: string,
+	baseTsconfig: string,
+	quickTsconfig: string,
+	options: { dryRun: boolean; log: WizardActionContext["log"] },
+): Promise<void> {
+	const { dryRun, log } = options;
+	if (!quickTsconfig || quickTsconfig === baseTsconfig) {
+		return;
+	}
+	const quickPath = path.resolve(projectDir, quickTsconfig);
+	if (await pathExists(quickPath)) {
+		return;
+	}
+
+	const content = {
+		extends: baseTsconfig,
+		compilerOptions: {
+			incremental: true,
+		},
+	};
+
+	if (dryRun) {
+		log.info(`[workspace] dry-run: seed quick tsconfig at ${quickTsconfig}`);
+		return;
+	}
+
+	await ensureDir(path.dirname(quickPath), dryRun, log);
+	await fs.writeFile(quickPath, `${JSON.stringify(content, null, 2)}\n`, "utf8");
+	log.info(`[workspace] seeded quick tsconfig at ${quickTsconfig}`);
+}
+
+async function ensureDerivedTsconfig(
+	projectDir: string,
+	targetTsconfig: string,
+	parentTsconfig: string,
+	options: { dryRun: boolean; log: WizardActionContext["log"] },
+): Promise<void> {
+	const { dryRun, log } = options;
+	if (!targetTsconfig || targetTsconfig === parentTsconfig) return;
+	const targetPath = path.resolve(projectDir, targetTsconfig);
+	if (await pathExists(targetPath)) return;
+
+	const parentExists = await pathExists(path.resolve(projectDir, parentTsconfig));
+	if (!parentExists) return;
+
+	const content = {
+		extends: parentTsconfig,
+		compilerOptions: {
+			incremental: true,
+		},
+	};
+
+	if (dryRun) {
+		log.info(`[workspace] dry-run: seed tsconfig at ${targetTsconfig}`);
+		return;
+	}
+
+	await ensureDir(path.dirname(targetPath), dryRun, log);
+	await fs.writeFile(targetPath, `${JSON.stringify(content, null, 2)}\n`, "utf8");
+	log.info(`[workspace] seeded tsconfig at ${targetTsconfig}`);
+}
+
+async function ensureTurboTsconfig(
+	projectDir: string,
+	baseTsconfig: string,
+	turboTsconfig: string,
+	options: { dryRun: boolean; log: WizardActionContext["log"] },
+): Promise<void> {
+	const { dryRun, log } = options;
+	if (!turboTsconfig || turboTsconfig === baseTsconfig) {
+		return;
+	}
+	const turboPath = path.resolve(projectDir, turboTsconfig);
+	if (await pathExists(turboPath)) {
+		return;
+	}
+
+	const content = {
+		extends: baseTsconfig,
+		compilerOptions: {
+			incremental: true,
+		},
+	};
+
+	if (dryRun) {
+		log.info(`[workspace] dry-run: seed turbo tsconfig at ${turboTsconfig}`);
+		return;
+	}
+
+	await ensureDir(path.dirname(turboPath), dryRun, log);
+	await fs.writeFile(turboPath, `${JSON.stringify(content, null, 2)}\n`, "utf8");
+	log.info(`[workspace] seeded turbo tsconfig at ${turboTsconfig}`);
 }
 
 async function runCommand(

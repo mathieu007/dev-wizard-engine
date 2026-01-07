@@ -296,6 +296,20 @@ async function resolveConfigImport({
 }: ResolveImportOptions): Promise<string> {
 	const fromDir = path.dirname(fromPath);
 
+	// Prefer configs from local node_modules in the caller's directory/cwd to
+	// ensure test fixtures and sandboxes are honoured ahead of workspace
+	// fallbacks.
+	for (const baseDir of [fromDir, cwd]) {
+		const candidatePkgJson = path.join(baseDir, "node_modules", specifier, "package.json");
+		if (await pathExists(candidatePkgJson)) {
+			const pkgRoot = path.dirname(candidatePkgJson);
+			const configFromLocalPackage = await locatePackageConfig(pkgRoot);
+			if (configFromLocalPackage) {
+				return configFromLocalPackage;
+			}
+		}
+	}
+
 	if (isFileLikeSpecifier(specifier)) {
 		const candidate = path.resolve(fromDir, specifier);
 		return candidate;

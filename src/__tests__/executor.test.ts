@@ -2135,6 +2135,35 @@ describe("checkpoints and resume", () => {
 			maintenanceNotes: "",
 		};
 
+		const maintenanceWindowDetails = {
+			identifier: "weekly-maintenance",
+			base: "weekly",
+		};
+
+		execaMocks.execaCommand.mockImplementation((command: unknown) => {
+			const commandText = typeof command === "string" ? command : String(command);
+			if (commandText.includes("generateMaintenanceWindow.ts")) {
+				return execaMocks.createProcess({
+					stdout: JSON.stringify(maintenanceWindowDetails),
+				});
+			}
+			if (commandText.includes("detectUpgradeTask.ts")) {
+				return execaMocks.createProcess({ stdout: "false" });
+			}
+			const printfMatch = commandText.match(/printf\s+['"]?%?s?['"]?\s+(.+)/s);
+			if (printfMatch) {
+				let value = printfMatch[1]?.trim() ?? "";
+				if (
+					(value.startsWith("'") && value.endsWith("'")) ||
+					(value.startsWith('"') && value.endsWith('"'))
+				) {
+					value = value.slice(1, -1);
+				}
+				return execaMocks.createProcess({ stdout: value });
+			}
+			return execaMocks.createProcess();
+		});
+
 		const collectState = await executeScenario({
 			config,
 			scenarioId: "maintenance-window",
@@ -2184,10 +2213,40 @@ describe("checkpoints and resume", () => {
 				Promise.resolve({ exitCode: 0, stdout, stderr: "" }),
 				{ stdout: undefined, stderr: undefined },
 			);
-		execaMocks.execaCommand.mockImplementation((command: unknown) => {
+		const commitSummaryPath = path.join(tmpDir, "COMMIT.SUMMARY.md");
+		execaMocks.execaCommand.mockImplementation(async (command: unknown) => {
 			const commandText = typeof command === "string" ? command : String(command);
 			if (commandText.includes("previewWorkflowCommand.ts")) {
 				return createProcess('{"preview":"cmd","run":"cmd"}');
+			}
+			if (commandText.includes("resolveWorkspaceProjects.ts")) {
+				return createProcess(
+					JSON.stringify([{ id: "packages/app", label: "packages/app" }]),
+				);
+			}
+			if (commandText.includes("git status --porcelain")) {
+				return createProcess("clean");
+			}
+			if (commandText.includes("commitMessageFile.ts")) {
+				const message = await fs.readFile(commitSummaryPath, "utf8");
+				return createProcess(message);
+			}
+			if (commandText.includes("printf 'null'")) {
+				return createProcess("null");
+			}
+			if (/\bprintf\s+true\b/.test(commandText)) {
+				return createProcess("true");
+			}
+			const printfMatch = commandText.match(/printf\s+['"]?%?s?['"]?\s+(.+)/s);
+			if (printfMatch) {
+				let value = printfMatch[1]?.trim() ?? "";
+				if (
+					(value.startsWith("'") && value.endsWith("'")) ||
+					(value.startsWith('"') && value.endsWith('"'))
+				) {
+					value = value.slice(1, -1);
+				}
+				return createProcess(value);
 			}
 			return createProcess("ok");
 		});
@@ -2244,6 +2303,10 @@ describe("checkpoints and resume", () => {
 		expect(collectState.answers.dirtyWorktreeCommitMessage).toContain(
 			"automation snapshot",
 		);
+		const executeOverrides = {
+			...collectState.answers,
+			executeWorkflowCurrent: true,
+		};
 
 		const executeState = await executeScenario({
 			config,
@@ -2254,7 +2317,7 @@ describe("checkpoints and resume", () => {
 			dryRun: true,
 			quiet: true,
 			verbose: false,
-			overrides: collectState.answers,
+			overrides: executeOverrides,
 			phase: "execute",
 			nonInteractive: true,
 			promptDriver: new NonInteractivePromptDriver(),
