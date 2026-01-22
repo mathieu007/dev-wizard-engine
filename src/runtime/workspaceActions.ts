@@ -986,6 +986,10 @@ async function runWorkspacePush(
 			fallbackCommitMessage,
 			pushTags,
 			setUpstream,
+			excludePaths: entries
+				.map((entry) => entry.path)
+				.filter((entryPath): entryPath is string => Boolean(entryPath && entryPath !== "."))
+				.map((entryPath) => entryPath.split(path.sep).join("/")),
 		});
 	}
 
@@ -1556,6 +1560,7 @@ async function processRootRepo(options: {
 	fallbackCommitMessage: string;
 	pushTags: boolean;
 	setUpstream: boolean;
+	excludePaths?: string[];
 }): Promise<void> {
 	const {
 		repoRoot,
@@ -1579,7 +1584,11 @@ async function processRootRepo(options: {
 		dryRun,
 		log,
 	);
-	await runCommand("git", ["add", "--all"], { cwd: repoRoot, dryRun, log });
+	const addArgs = ["add", "--all"];
+	if (options.excludePaths && options.excludePaths.length > 0) {
+		addArgs.push("--", ".", ...options.excludePaths.map((entryPath) => `:(exclude)${entryPath}`));
+	}
+	await runCommand("git", addArgs, { cwd: repoRoot, dryRun, log });
 	if (await hasStagedChanges(repoRoot, dryRun, log)) {
 		await runCommand(
 			"git",
