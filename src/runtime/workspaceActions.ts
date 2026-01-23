@@ -854,12 +854,20 @@ async function runWorkspaceInit(
 		readString(context.state.answers.workspaceDefaultBranch);
 
 	const manifest = await readWorkspaceManifest(manifestPath);
+	const sandboxRemoteRoot = process.env.DEV_WIZARD_SANDBOX_REMOTE_ROOT;
+	const sandboxSlug = process.env.DEV_WIZARD_SANDBOX_SLUG;
 
 	for (const entry of manifest) {
 		const relPath = readString(entry.path);
-		const repo = readString(entry.repo);
+		const role = readString(entry.role);
+		let repo = readString(entry.repo);
 		const name = readString(entry.name) ?? relPath ?? "(unknown)";
 		const defaultBranch = readString(entry.defaultBranch) ?? fallbackBranch;
+		const isRoot = relPath === "." || role === "root";
+
+		if (sandboxRemoteRoot && sandboxSlug && isRoot) {
+			repo = path.resolve(sandboxRemoteRoot, `${sandboxSlug}.git`);
+		}
 
 		if (!repo) {
 			log.info(`[workspace-init] skipping ${name} (no repo configured)`);
@@ -940,6 +948,7 @@ async function runWorkspacePush(
 	const includeRoot = readBoolean(params.includeRoot) ??
 		readBoolean(context.state.answers.workspacePushIncludeRoot) ??
 		true;
+	const sandboxOnlyRoot = process.env.DEV_WIZARD_SANDBOX_ONLY_ROOT === "1";
 
 	const manifest = await readWorkspaceManifest(manifestPath);
 	const normalizedEntries = manifest.map((entry) => ({
@@ -948,12 +957,17 @@ async function runWorkspacePush(
 	}));
 
 	const rootEntry = normalizedEntries.find((entry) => entry.path === ".");
-	const entries = normalizedEntries.filter((entry) =>
-		entry.path === "." ? false : shouldProcessPushEntry(entry, { filters }),
-	);
+	const entries = sandboxOnlyRoot
+		? []
+		: normalizedEntries.filter((entry) =>
+				entry.path === "." ? false : shouldProcessPushEntry(entry, { filters }),
+			);
 
 	const hasWork = entries.length > 0;
 	if (!hasWork && !(includeRoot && rootEntry)) {
+		if (includeRoot && !rootEntry) {
+			log.warn("[workspace-push] root push requested, but no root entry found in manifest; skipping root.");
+		}
 		log.info("[workspace-push] manifest is empty; nothing to do.");
 		return;
 	}
@@ -986,7 +1000,7 @@ async function runWorkspacePush(
 			fallbackCommitMessage,
 			pushTags,
 			setUpstream,
-			excludePaths: entries
+			excludePaths: normalizedEntries
 				.map((entry) => entry.path)
 				.filter((entryPath): entryPath is string => Boolean(entryPath && entryPath !== "."))
 				.map((entryPath) => entryPath.split(path.sep).join("/")),
@@ -1626,10 +1640,13 @@ function buildPushArgs(
 ): string[] {
 	const args = ["push", "--no-verify"];
 	if (options?.setUpstream) {
-		args.push("-u");
+		args.push("--set-upstream");
 	}
 	if (remoteName) {
 		args.push(remoteName);
+		if (options?.setUpstream) {
+			args.push("HEAD");
+		}
 	}
 	if (options?.pushTags) {
 		args.push("--tags");
