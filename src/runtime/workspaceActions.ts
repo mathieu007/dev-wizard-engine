@@ -991,6 +991,15 @@ async function runWorkspacePush(
 
 	if (includeRoot && rootEntry) {
 		// Push the root regardless of filters when explicitly requested.
+		const excludePaths = normalizedEntries
+			.map((entry) => entry.path)
+			.filter((entryPath): entryPath is string => Boolean(entryPath && entryPath !== "."))
+			.map((entryPath) => entryPath.split(path.sep).join("/"));
+		const submodulePaths = await readGitSubmodulePaths(repoRoot);
+		const rootExcludePaths =
+			submodulePaths.length > 0
+				? excludePaths.filter((entryPath) => !submodulePaths.includes(entryPath))
+				: excludePaths;
 		await processRootRepo({
 			repoRoot,
 			dryRun,
@@ -1000,10 +1009,7 @@ async function runWorkspacePush(
 			fallbackCommitMessage,
 			pushTags,
 			setUpstream,
-			excludePaths: normalizedEntries
-				.map((entry) => entry.path)
-				.filter((entryPath): entryPath is string => Boolean(entryPath && entryPath !== "."))
-				.map((entryPath) => entryPath.split(path.sep).join("/")),
+			excludePaths: rootExcludePaths,
 		});
 	}
 
@@ -1854,6 +1860,33 @@ async function readWorkspaceManifest(
 		throw new Error("workspace manifest must be a JSON array");
 	}
 	return parsed as WorkspaceManifestEntry[];
+}
+
+async function readGitSubmodulePaths(repoRoot: string): Promise<string[]> {
+	const gitmodulesPath = path.join(repoRoot, ".gitmodules");
+	if (!(await pathExists(gitmodulesPath))) {
+		return [];
+	}
+
+	const raw = await fs.readFile(gitmodulesPath, "utf8");
+	const paths = new Set<string>();
+	for (const line of raw.split(/\r?\n/u)) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith(";")) {
+			continue;
+		}
+		const match = trimmed.match(/^path\s*=\s*(.+)$/u);
+		if (!match) {
+			continue;
+		}
+		const rawPath = match[1]?.trim();
+		if (!rawPath) {
+			continue;
+		}
+		const normalized = path.normalize(rawPath).split(path.sep).join("/");
+		paths.add(normalized);
+	}
+	return [...paths];
 }
 
 function resolveRepoRoot(
